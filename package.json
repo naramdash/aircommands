@@ -1,23 +1,19 @@
 {
   "name": "aircommands",
-  "private": true,
-  "version": "0.0.0",
   "type": "module",
+  "private": true,
   "scripts": {
-    "dev": "vite",
-    "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
   },
   "dependencies": {
-    "nitro": "^3.0.260610-beta",
-    "vue": "^3.5.38"
-  },
-  "devDependencies": {
-    "@types/node": "^24.13.2",
-    "@vitejs/plugin-vue": "^6.0.7",
-    "@vue/tsconfig": "^0.9.1",
-    "typescript": "~6.0.2",
-    "vite": "^8.1.0",
-    "vue-tsc": "^3.3.5"
+    "@mediapipe/tasks-vision": "^0.10.35",
+    "@types/node": "^26.0.0",
+    "nuxt": "^4.4.8",
+    "vue": "^3.5.38",
+    "vue-router": "^5.1.0"
   }
 }
