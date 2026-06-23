@@ -11,9 +11,11 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",
+    "@nuxt/ui": "^4.9.0",
     "@types/node": "^26.0.0",
+    "@xstate/vue": "^5.0.0",
     "nuxt": "^4.4.8",
-    "vue": "^3.5.38",
-    "vue-router": "^5.1.0"
+    "tailwindcss": "^4.3.1",
+    "xstate": "^5.32.1"
   }
 }

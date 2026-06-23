@@ -7,7 +7,10 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
 
   ssr: false,
+  modules: ['@nuxt/ui'],
+  css: ['~/assets/css/main.css'],
   nitro: {
+    preset: 'bun',
     publicAssets: [
       {
         dir: resolve('node_modules/@mediapipe/tasks-vision/wasm'),

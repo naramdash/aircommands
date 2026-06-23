@@ -17,7 +17,7 @@ const handLandmarker = await HandLandmarker.createFromOptions( vision,
   { 
     baseOptions: { modelAssetPath: ModelAssetPath }, 
     runningMode: 'VIDEO',
-    numHands: 1 
+    numHands: 2, // for prefer detection for right hand detection, 
   });
 
 export { vision, handLandmarker };

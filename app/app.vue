@@ -1,12 +1,51 @@
 <script setup lang="ts">
 import { HandLandmarker, type NormalizedLandmark } from '@mediapipe/tasks-vision'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useMachine } from '@xstate/vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { classifyHandGesture } from './utils/hand_gesture_detection'
 import { handLandmarker } from './utils/hand_landmark_detection'
+import {
+  handSequenceStateMachine,
+  type HandGestureName,
+} from './utils/hand_sequence_state_machine'
+
+type Handedness = 'Left' | 'Right' | 'Unknown'
+
+type HandednessCategory = {
+  categoryName?: string
+  displayName?: string
+}
 
 const videoRef = ref<HTMLVideoElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const errorMessage = ref('')
 const isCameraActive = ref(false)
+const { snapshot: handSequenceSnapshot, send: sendHandSequenceEvent } =
+  useMachine(handSequenceStateMachine, {
+    input: {
+      sequence: ['gesture_thumb_only'],
+    },
+  })
+const completedBackgroundClasses = [
+  'bg-red-600',
+  'bg-orange-500',
+  'bg-yellow-400',
+  'bg-green-500',
+  'bg-blue-600',
+  'bg-indigo-700',
+  'bg-violet-600',
+]
+const pageBackgroundClass = computed(() => {
+  const completedCount = handSequenceSnapshot.value.context.completedCount
+
+  if (completedCount <= 0) {
+    return 'bg-slate-50 dark:bg-slate-900'
+  }
+
+  return completedBackgroundClasses[
+    (completedCount - 1) % completedBackgroundClasses.length
+  ]
+})
 
 let mediaStream: MediaStream | null = null
 let animationFrameId = 0
@@ -71,8 +110,17 @@ function drawLandmarkFrame() {
 
     context.clearRect(0, 0, canvas.width, canvas.height)
 
-    const result = handLandmarker.detectForVideo(video, performance.now())
-    drawHandLandmarks(context, result.landmarks, canvas.width, canvas.height)
+    const now = performance.now()
+    const result = handLandmarker.detectForVideo(video, now)
+    drawHandLandmarks(
+      context,
+      result.landmarks,
+      result.handednesses,
+      canvas.width,
+      canvas.height,
+    )
+
+    sendRecognizedGesture(result.landmarks, result.handednesses, now)
   }
 
   animationFrameId = requestAnimationFrame(drawLandmarkFrame)
@@ -81,14 +129,19 @@ function drawLandmarkFrame() {
 function drawHandLandmarks(
   context: CanvasRenderingContext2D,
   hands: NormalizedLandmark[][],
+  handednesses: HandednessCategory[][] = [],
   width: number,
   height: number,
 ) {
   context.lineWidth = 4
-  context.strokeStyle = '#14b8a6'
-  context.fillStyle = '#f97316'
 
-  for (const landmarks of hands) {
+  hands.forEach((landmarks, index) => {
+    const handedness = getHandedness(handednesses[index])
+    const colors = getHandColors(handedness)
+
+    context.strokeStyle = colors.stroke
+    context.fillStyle = colors.fill
+
     for (const connection of HandLandmarker.HAND_CONNECTIONS) {
       const from = landmarks[connection.start]
       const to = landmarks[connection.end]
@@ -111,7 +164,71 @@ function drawHandLandmarks(
       context.arc(x, y, 6, 0, Math.PI * 2)
       context.fill()
     }
+  })
+}
+
+function getHandedness(categories: HandednessCategory[] = []): Handedness {
+  const label = categories[0]?.categoryName ?? categories[0]?.displayName
+
+  if (label === 'Left' || label === 'Right') {
+    return label
   }
+
+  return 'Unknown'
+}
+
+function getHandColors(handedness: Handedness) {
+  if (handedness === 'Left') {
+    return {
+      stroke: '#2563eb',
+      fill: '#60a5fa',
+    }
+  }
+
+  if (handedness === 'Right') {
+    return {
+      stroke: '#dc2626',
+      fill: '#fb7185',
+    }
+  }
+
+  return {
+    stroke: '#14b8a6',
+    fill: '#f97316',
+  }
+}
+
+function sendRecognizedGesture(
+  hands: NormalizedLandmark[][],
+  handednesses: HandednessCategory[][] = [],
+  at: number,
+) {
+  const rightHandIndex = handednesses.findIndex((categories) => {
+    return getHandedness(categories) === 'Right'
+  })
+
+  if (rightHandIndex === -1) {
+    sendHandSequenceEvent({
+      type: 'GESTURE_FRAME',
+      gesture: 'no_gesture',
+      hand: 'Right',
+      at,
+    })
+    return
+  }
+
+  sendHandSequenceEvent({
+    type: 'GESTURE_FRAME',
+    gesture: classifyHandGesture(hands[rightHandIndex], getExpectedGesture()),
+    hand: getHandedness(handednesses[rightHandIndex]),
+    at,
+  })
+}
+
+function getExpectedGesture(): HandGestureName {
+  const context = handSequenceSnapshot.value.context
+
+  return context.sequence[context.stepIndex] ?? 'no_gesture'
 }
 
 function landmarkToCanvasPoint(
@@ -119,7 +236,7 @@ function landmarkToCanvasPoint(
   width: number,
   height: number,
 ) {
-  return [(1 - landmark.x) * width, landmark.y * height] as const
+  return [landmark.x * width, landmark.y * height] as const
 }
 
 onMounted(() => {
@@ -132,105 +249,81 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="camera-view">
-    <div class="camera-surface">
-      <video ref="videoRef" muted playsinline class="camera-video" />
-      <canvas ref="canvasRef" class="camera-canvas" />
+  <main class="grid min-h-svh grid-rows-[minmax(0,1fr)_auto] gap-4 box-border p-3 transition-colors md:p-6"
+    :class="pageBackgroundClass">
+    <div class="w-full max-w-[960px] self-center justify-self-center">
+      <div
+        class="relative aspect-video w-full overflow-hidden rounded-t-lg border border-slate-200 bg-neutral-950 dark:border-slate-800 max-md:rounded-t-md">
+        <video ref="videoRef" muted playsinline class="block size-full scale-x-[-1] object-cover" />
+        <canvas ref="canvasRef" class="pointer-events-none absolute inset-0 block size-full scale-x-[-1]" />
+      </div>
+
+      <dl
+        class="m-0 grid grid-cols-2 overflow-hidden rounded-b-lg border border-t-0 border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-800 md:grid-cols-5"
+        aria-label="Hand sequence state">
+        <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+            State
+          </dt>
+          <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
+            {{ handSequenceSnapshot.value }}
+          </dd>
+        </div>
+        <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+            Progress
+          </dt>
+          <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
+            {{ handSequenceSnapshot.context.stepIndex }} /
+            {{ handSequenceSnapshot.context.sequence.length }}
+          </dd>
+        </div>
+        <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+            Expected
+          </dt>
+          <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
+            {{
+              handSequenceSnapshot.context.sequence[
+              handSequenceSnapshot.context.stepIndex
+              ] ?? 'done'
+            }}
+          </dd>
+        </div>
+        <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+            Candidate
+          </dt>
+          <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
+            {{ handSequenceSnapshot.context.candidateHand }}
+            {{ handSequenceSnapshot.context.candidateGesture }}
+          </dd>
+        </div>
+        <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+            Completed
+          </dt>
+          <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
+            {{ handSequenceSnapshot.context.completedCount }}
+          </dd>
+        </div>
+      </dl>
     </div>
 
-    <div class="camera-controls">
-      <button v-if="!isCameraActive" type="button" @click="startCamera">
+    <div class="flex min-h-11 flex-wrap items-center justify-center gap-3">
+      <button v-if="!isCameraActive" type="button"
+        class="h-10 min-w-22 cursor-pointer rounded-md border border-slate-200 bg-white text-[15px] font-semibold leading-none text-slate-950 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50"
+        @click="startCamera">
         Start
       </button>
-      <button v-else type="button" @click="stopCamera">
+      <button v-else type="button"
+        class="h-10 min-w-22 cursor-pointer rounded-md border border-slate-200 bg-white text-[15px] font-semibold leading-none text-slate-950 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50"
+        @click="stopCamera">
         Stop
       </button>
-      <p v-if="errorMessage" class="camera-error">{{ errorMessage }}</p>
+      <p v-if="errorMessage" class="max-w-[min(100%,640px)] text-sm text-orange-700">
+        {{ errorMessage }}
+      </p>
     </div>
   </main>
 </template>
-
-<style scoped>
-.camera-view {
-  min-height: 100svh;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 16px;
-  padding: 24px;
-  box-sizing: border-box;
-}
-
-.camera-surface {
-  position: relative;
-  width: min(100%, 960px);
-  aspect-ratio: 16 / 9;
-  align-self: center;
-  justify-self: center;
-  overflow: hidden;
-  background: #111;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.camera-video {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  transform: scaleX(-1);
-}
-
-.camera-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
-  pointer-events: none;
-}
-
-.camera-controls {
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-button {
-  min-width: 88px;
-  height: 40px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-h);
-  background: var(--social-bg);
-  font: 600 15px/1 var(--sans);
-  cursor: pointer;
-}
-
-button:hover {
-  box-shadow: var(--shadow);
-}
-
-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.camera-error {
-  max-width: min(100%, 640px);
-  color: #c2410c;
-  font-size: 14px;
-}
-
-@media (max-width: 720px) {
-  .camera-view {
-    padding: 12px;
-  }
-
-  .camera-surface {
-    border-radius: 6px;
-  }
-}
-</style>
