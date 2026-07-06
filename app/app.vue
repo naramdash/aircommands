@@ -1,111 +1,120 @@
 <script setup lang="ts">
-import { HandLandmarker, type NormalizedLandmark } from '@mediapipe/tasks-vision'
-import { useMachine } from '@xstate/vue'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { handCommandSequences } from './utils/hand_command_sequences'
-import type { HandCommandSequence } from './utils/hand_command_sequences'
+import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { getRightHandIndex } from './utils/gesture_command_detection/coordinates'
 import {
-  classifyHandGesture,
-  mirrorLandmarksHorizontally,
-} from './utils/hand_gesture_detection'
+  appendTrailPoint,
+  pruneTrail,
+  RENDER_TRAIL_MS,
+} from './utils/gesture_command_detection/pointer_trail'
+import {
+  createRecognitionContext,
+  markExecutionFailure,
+  markExecutionSuccess,
+  reduceRecognitionFrame,
+} from './utils/gesture_command_detection/recognition_reducer'
+import type {
+  GestureCandidate,
+  HandednessCategory,
+  PointerTrailPoint,
+  RecognitionState,
+} from './utils/gesture_command_detection/types'
+import { gestureCommands } from './utils/gesture_command_detection/command_map'
 import { handLandmarker } from './utils/hand_landmark_detection'
-import {
-  handSequenceStateMachine,
-  type HandGestureName,
-} from './utils/hand_sequence_state_machine'
 
-type Handedness = 'Left' | 'Right' | 'Unknown'
+type OpenAppResponse =
+  | {
+      success: true
+      app: string
+      message: string
+      requestId: string
+    }
+  | {
+      success: false
+      app?: string
+      error: string
+      message: string
+      availableApps?: string[]
+      requestId: string
+    }
 
-type HandednessCategory = {
-  categoryName?: string
-  displayName?: string
-}
+const POINTER_RADIUS = 3.5
+const POINTER_LINE_WIDTH = 2
+const POINTER_COLOR = '34, 197, 94'
+const RECOGNIZED_STROKE_RADIUS = 4.5
+const RECOGNIZED_STROKE_LINE_WIDTH = 5
+const RECOGNIZED_STROKE_COLOR = '250, 204, 21'
 
-type GestureSample = {
-  gesture: HandGestureName
-  at: number
-}
-
-type CompletionLogEntry = {
-  id: string
-  sequenceLabel: string
-  gestures: HandGestureName[]
-  completedAt: number
-  completedCount: number
-}
-
-const GESTURE_WINDOW_MS = 160
-const GESTURE_WINDOW_MIN_SAMPLES = 2
-const GESTURE_WINDOW_MIN_RATIO = 0.6
 const videoRef = ref<HTMLVideoElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const errorMessage = ref('')
 const isCameraActive = ref(false)
-const selectedSequenceIndex = ref(0)
-const currentRecognizedGesture = ref<HandGestureName>('no_gesture')
-const completionHistory = ref<CompletionLogEntry[]>([])
-const completionToast = ref<CompletionLogEntry | null>(null)
-const { snapshot: handSequenceSnapshot, send: sendHandSequenceEvent } =
-  useMachine(handSequenceStateMachine, {
-    input: {
-      sequence: handCommandSequences[0]?.sequence,
-    },
-  })
-const selectedCommandSequence = computed(() => {
-  return handCommandSequences[selectedSequenceIndex.value] ?? handCommandSequences[0]
+const isRightIndexVisible = ref(false)
+const trailPointCount = ref(0)
+const recognitionState = ref<RecognitionState>('tracking')
+const currentCandidateLabel = ref('없음')
+const confirmationPercent = ref(0)
+const cooldownRemainingMs = ref(0)
+const commandResultMessage = ref('')
+const strokeStartPercent = ref(0)
+const strokeCapturePointCount = ref(0)
+const strokeEndReasonText = ref('없음')
+const gestureCompletionNotice = ref('')
+const trackingStatus = computed(() => {
+  if (!isCameraActive.value) return '카메라 대기'
+  if (!isRightIndexVisible.value) return '오른손 대기'
+
+  if (recognitionState.value === 'ready_to_start') return '시작 가능'
+  if (recognitionState.value === 'drawing') return '입력 중'
+  if (recognitionState.value === 'stroke_ended') return '종료 감지'
+  if (recognitionState.value === 'candidate') return '실행 준비'
+  if (recognitionState.value === 'confirming') return '확인 중'
+  if (recognitionState.value === 'executing') return '실행 중'
+  if (recognitionState.value === 'cooldown') return '쿨다운'
+  if (recognitionState.value === 'error') return '오류'
+
+  return '추적 중'
 })
-const gestureLabels: Record<string, string> = {
-  gesture_fist: '주먹',
-  gesture_open: '손 펴기',
-  gesture_thumb_up: '엄지 위',
-  gesture_thumb_down: '엄지 아래',
-  gesture_thumb_left: '엄지 왼쪽',
-  gesture_thumb_right: '엄지 오른쪽',
-  gesture_thumb_only: '엄지만 펼침',
-  gesture_index_point: '검지',
-  gesture_middle_point: '중지',
-  gesture_pinky_point: '새끼',
-  gesture_peace: '브이',
-  gesture_rock: '락',
-  gesture_three: '세 손가락',
-  no_gesture: '인식 없음',
-}
-const sequenceStateLabels: Record<string, string> = {
-  no_gesture: '대기 중',
-  start_gesture: '시작 동작 인식',
-  sequence_gesture: '중간 동작 인식',
-  end_gesture: '완료 동작 인식',
-}
-const completedBackgroundClasses = [
-  'bg-red-600',
-  'bg-orange-500',
-  'bg-yellow-400',
-  'bg-green-500',
-  'bg-blue-600',
-  'bg-indigo-700',
-  'bg-violet-600',
-]
-const pageBackgroundClass = computed(() => {
-  const completedCount = handSequenceSnapshot.value.context.completedCount
-
-  if (completedCount <= 0) {
-    return 'bg-slate-50 dark:bg-slate-900'
+const cooldownSeconds = computed(() =>
+  Math.ceil(cooldownRemainingMs.value / 1000),
+)
+const supportedGestureItems = computed(() => Object.values(gestureCommands))
+const phaseGuideText = computed(() => {
+  if (!isCameraActive.value) return '카메라를 시작하세요'
+  if (!isRightIndexVisible.value) return '오른손 검지를 화면에 보여주세요'
+  if (recognitionState.value === 'ready_to_start') {
+    return '검지를 움직이면 인식이 시작됩니다'
   }
+  if (recognitionState.value === 'drawing') {
+    return '제스처를 그리고 잠깐 멈추면 종료됩니다'
+  }
+  if (recognitionState.value === 'stroke_ended') {
+    return '입력이 끝났습니다. 경로를 판정 중입니다'
+  }
+  if (recognitionState.value === 'candidate') {
+    return '멈춘 상태로 유지하면 명령이 확정됩니다'
+  }
+  if (recognitionState.value === 'confirming') {
+    return '확정 중입니다'
+  }
+  if (recognitionState.value === 'executing') return '명령 실행 중입니다'
+  if (recognitionState.value === 'cooldown') return '다음 입력을 잠시 대기합니다'
+  if (recognitionState.value === 'error') return '오류 상태입니다'
 
-  return completedBackgroundClasses[
-    (completedCount - 1) % completedBackgroundClasses.length
-  ]
+  return '검지 위치를 추적 중입니다'
 })
 
 let mediaStream: MediaStream | null = null
 let animationFrameId = 0
-let gestureSamples: GestureSample[] = []
-let stableGesture: HandGestureName = 'no_gesture'
-let stableGestureSeenAt = 0
-let completionToastTimer: ReturnType<typeof setTimeout> | null = null
+let pointerTrail: PointerTrailPoint[] = []
+let recognizedGesturePoints: PointerTrailPoint[] = []
+let recognitionContext = createRecognitionContext()
+let isExecutingRequest = false
+let gestureCompletionTimer: ReturnType<typeof setTimeout> | null = null
 
 async function startCamera() {
   errorMessage.value = ''
+  commandResultMessage.value = ''
 
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -124,11 +133,11 @@ async function startCamera() {
     await video.play()
 
     isCameraActive.value = true
-    drawLandmarkFrame()
+    drawPointerFrame()
   } catch (error) {
     stopCamera()
     errorMessage.value =
-      error instanceof Error ? error.message : 'Camera permission was denied.'
+      error instanceof Error ? error.message : '카메라 권한을 확인할 수 없습니다.'
   }
 }
 
@@ -141,16 +150,24 @@ function stopCamera() {
   mediaStream?.getTracks().forEach((track) => track.stop())
   mediaStream = null
   isCameraActive.value = false
-  resetGestureStabilizer()
+  clearPointerTrail()
+  resetRecognition()
+  clearGestureCompletionNotice()
 
   const video = videoRef.value
   if (video) {
     video.pause()
     video.srcObject = null
   }
+
+  const canvas = canvasRef.value
+  const context = canvas?.getContext('2d')
+  if (canvas && context) {
+    context.clearRect(0, 0, canvas.width, canvas.height)
+  }
 }
 
-function drawLandmarkFrame() {
+function drawPointerFrame() {
   const video = videoRef.value
   const canvas = canvasRef.value
   const context = canvas?.getContext('2d')
@@ -158,295 +175,434 @@ function drawLandmarkFrame() {
   if (!video || !canvas || !context) return
 
   if (video.videoWidth > 0 && video.videoHeight > 0) {
-    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-    }
-
-    context.clearRect(0, 0, canvas.width, canvas.height)
+    syncCanvasSize(canvas, video)
 
     const now = performance.now()
     const result = handLandmarker.detectForVideo(video, now)
-    drawHandLandmarks(
-      context,
+
+    context.clearRect(0, 0, canvas.width, canvas.height)
+
+    const rightHandVisible = updatePointerTrail(
       result.landmarks,
       result.handednesses,
-      canvas.width,
-      canvas.height,
+      now,
+    )
+    const previousRecognitionContext = recognitionContext
+    const recognitionResult = reduceRecognitionFrame(
+      recognitionContext,
+      pointerTrail,
+      now,
+      rightHandVisible,
     )
 
-    sendRecognizedGesture(result.landmarks, result.handednesses, now)
-  }
+    updateRecognizedGesturePreview(
+      previousRecognitionContext,
+      recognitionResult.context,
+    )
+    recognitionContext = recognitionResult.context
+    syncRecognitionDisplay(now)
 
-  animationFrameId = requestAnimationFrame(drawLandmarkFrame)
-}
-
-function drawHandLandmarks(
-  context: CanvasRenderingContext2D,
-  hands: NormalizedLandmark[][],
-  handednesses: HandednessCategory[][] = [],
-  width: number,
-  height: number,
-) {
-  context.lineWidth = 4
-
-  hands.forEach((landmarks, index) => {
-    const handedness = getHandedness(handednesses[index])
-    const colors = getHandColors(handedness)
-
-    context.strokeStyle = colors.stroke
-    context.fillStyle = colors.fill
-
-    for (const connection of HandLandmarker.HAND_CONNECTIONS) {
-      const from = landmarks[connection.start]
-      const to = landmarks[connection.end]
-
-      if (!from || !to) continue
-
-      const [fromX, fromY] = landmarkToCanvasPoint(from, width, height)
-      const [toX, toY] = landmarkToCanvasPoint(to, width, height)
-
-      context.beginPath()
-      context.moveTo(fromX, fromY)
-      context.lineTo(toX, toY)
-      context.stroke()
+    if (recognitionResult.executionCandidate) {
+      void executeCandidate(recognitionResult.executionCandidate)
     }
 
-    for (const landmark of landmarks) {
-      const [x, y] = landmarkToCanvasPoint(landmark, width, height)
-
-      context.beginPath()
-      context.arc(x, y, 6, 0, Math.PI * 2)
-      context.fill()
-    }
-  })
-}
-
-function getHandedness(categories: HandednessCategory[] = []): Handedness {
-  const label = categories[0]?.categoryName ?? categories[0]?.displayName
-
-  if (label === 'Left' || label === 'Right') {
-    return label
+    drawPointerTrail(context, canvas.width, canvas.height, now)
+    drawRecognizedGestureStroke(context, canvas.width, canvas.height)
+    drawStrokeGuides(context, canvas.width, canvas.height)
+    drawConfirmationRing(context, canvas.width, canvas.height)
   }
 
-  return 'Unknown'
+  animationFrameId = requestAnimationFrame(drawPointerFrame)
 }
 
-function getHandColors(handedness: Handedness) {
-  if (handedness === 'Left') {
-    return {
-      stroke: '#2563eb',
-      fill: '#60a5fa',
-    }
+function syncCanvasSize(canvas: HTMLCanvasElement, video: HTMLVideoElement) {
+  if (canvas.width === video.videoWidth && canvas.height === video.videoHeight) {
+    return
   }
 
-  if (handedness === 'Right') {
-    return {
-      stroke: '#dc2626',
-      fill: '#fb7185',
-    }
-  }
-
-  return {
-    stroke: '#14b8a6',
-    fill: '#f97316',
-  }
+  canvas.width = video.videoWidth
+  canvas.height = video.videoHeight
 }
 
-function selectCommandSequence(index: number) {
-  const commandSequence = handCommandSequences[index]
-
-  if (!commandSequence) return
-
-  selectedSequenceIndex.value = index
-  resetGestureStabilizer()
-  sendHandSequenceEvent({
-    type: 'SET_SEQUENCE',
-    sequence: commandSequence.sequence,
-  })
-}
-
-function getCommandSequenceSteps(commandSequence: HandCommandSequence) {
-  return ['gesture_fist', ...commandSequence.sequence, 'gesture_open']
-}
-
-function getGestureLabel(gesture: HandGestureName) {
-  return gestureLabels[gesture] ?? gesture
-}
-
-function getSequenceStateLabel(state: string) {
-  return sequenceStateLabels[state] ?? state
-}
-
-function getCompletedSequenceLabel(gestures: HandGestureName[]) {
-  const completedMiddleGestures = getMiddleGestures(gestures)
-  const commandSequence = handCommandSequences.find((sequence) =>
-    areGestureSequencesEqual(sequence.sequence, completedMiddleGestures),
-  )
-
-  if (commandSequence) return commandSequence.label
-
-  return completedMiddleGestures.length
-    ? completedMiddleGestures.map(getGestureLabel).join(' ')
-    : gestures.map(getGestureLabel).join(' ')
-}
-
-function getMiddleGestures(gestures: HandGestureName[]) {
-  const middleGestures = [...gestures]
-
-  if (middleGestures[0] === 'gesture_fist') {
-    middleGestures.shift()
-  }
-
-  if (middleGestures[middleGestures.length - 1] === 'gesture_open') {
-    middleGestures.pop()
-  }
-
-  return middleGestures
-}
-
-function areGestureSequencesEqual(
-  first: HandGestureName[],
-  second: HandGestureName[],
-) {
-  return (
-    first.length === second.length &&
-    first.every((gesture, index) => gesture === second[index])
-  )
-}
-
-function formatCompletionTime(completedAt: number) {
-  return new Intl.DateTimeFormat('ko-KR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(completedAt)
-}
-
-function recordSequenceCompletion() {
-  const context = handSequenceSnapshot.value.context
-  const gestures = context.lastCompletedSequence.length
-    ? [...context.lastCompletedSequence]
-    : [...context.sequence]
-  const completedAt = Date.now()
-  const entry: CompletionLogEntry = {
-    id: `${completedAt}-${context.completedCount}`,
-    sequenceLabel: getCompletedSequenceLabel(gestures),
-    gestures,
-    completedAt,
-    completedCount: context.completedCount,
-  }
-
-  completionHistory.value = [entry, ...completionHistory.value].slice(0, 20)
-  completionToast.value = entry
-
-  if (completionToastTimer) {
-    clearTimeout(completionToastTimer)
-  }
-
-  completionToastTimer = setTimeout(() => {
-    completionToast.value = null
-    completionToastTimer = null
-  }, 1800)
-}
-
-function sendRecognizedGesture(
+function updatePointerTrail(
   hands: NormalizedLandmark[][],
   handednesses: HandednessCategory[][] = [],
   at: number,
 ) {
-  const rightHandIndex = handednesses.findIndex((categories) => {
-    return getHandedness(categories) === 'Right'
-  })
+  const rightHandIndex = getRightHandIndex(handednesses)
 
   if (rightHandIndex === -1) {
-    resetGestureStabilizer()
-    sendHandSequenceEvent({
-      type: 'GESTURE_FRAME',
-      gesture: 'no_gesture',
-      hand: 'Right',
-      at,
-    })
-    return
+    isRightIndexVisible.value = false
+    prunePointerTrail(at)
+    return false
   }
 
-  const userFacingLandmarks = mirrorLandmarksHorizontally(hands[rightHandIndex])
-  const rawGesture = classifyHandGesture(userFacingLandmarks, getExpectedGesture())
-  const recognizedGesture = stabilizeGesture(rawGesture, at)
+  const indexTip = hands[rightHandIndex]?.[8]
+  if (!indexTip) {
+    isRightIndexVisible.value = false
+    prunePointerTrail(at)
+    return false
+  }
 
-  currentRecognizedGesture.value = recognizedGesture
-
-  sendHandSequenceEvent({
-    type: 'GESTURE_FRAME',
-    gesture: recognizedGesture,
-    hand: getHandedness(handednesses[rightHandIndex]),
+  pointerTrail = appendTrailPoint(pointerTrail, {
+    x: indexTip.x,
+    y: indexTip.y,
     at,
   })
+
+  isRightIndexVisible.value = true
+  prunePointerTrail(at)
+  return true
 }
 
-function stabilizeGesture(gesture: HandGestureName, at: number): HandGestureName {
-  gestureSamples.push({ gesture, at })
-  gestureSamples = gestureSamples.filter(
-    (sample) => at - sample.at <= GESTURE_WINDOW_MS,
-  )
-
-  if (gestureSamples.length < GESTURE_WINDOW_MIN_SAMPLES) {
-    return stableGesture
-  }
-
-  const counts = new Map<HandGestureName, number>()
-
-  for (const sample of gestureSamples) {
-    counts.set(sample.gesture, (counts.get(sample.gesture) ?? 0) + 1)
-  }
-
-  let dominantGesture: HandGestureName = 'no_gesture'
-  let dominantCount = 0
-
-  for (const [sampleGesture, count] of counts) {
-    if (count > dominantCount) {
-      dominantGesture = sampleGesture
-      dominantCount = count
-    }
-  }
-
-  if (dominantCount / gestureSamples.length >= GESTURE_WINDOW_MIN_RATIO) {
-    stableGesture = dominantGesture
-    stableGestureSeenAt = at
-    return stableGesture
-  }
-
-  if (
-    stableGesture !== 'no_gesture' &&
-    at - stableGestureSeenAt <= GESTURE_WINDOW_MS
-  ) {
-    return stableGesture
-  }
-
-  stableGesture = 'no_gesture'
-  stableGestureSeenAt = at
-  return stableGesture
+function prunePointerTrail(at: number) {
+  pointerTrail = pruneTrail(pointerTrail, at, RENDER_TRAIL_MS)
+  trailPointCount.value = pointerTrail.length
 }
 
-function resetGestureStabilizer() {
-  gestureSamples = []
-  stableGesture = 'no_gesture'
-  stableGestureSeenAt = 0
-  currentRecognizedGesture.value = 'no_gesture'
+function drawPointerTrail(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  at: number,
+) {
+  context.save()
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+  context.shadowColor = 'rgba(34, 197, 94, 0.35)'
+  context.shadowBlur = 5
+
+  for (let index = 1; index < pointerTrail.length; index += 1) {
+    const previousPoint = pointerTrail[index - 1]
+    const point = pointerTrail[index]
+    const ageRatio = Math.min(1, Math.max(0, (at - point.at) / RENDER_TRAIL_MS))
+    const alpha = Math.max(0.16, 1 - ageRatio)
+
+    context.strokeStyle = `rgba(${POINTER_COLOR}, ${alpha})`
+    context.lineWidth = POINTER_LINE_WIDTH
+    context.beginPath()
+    context.moveTo(previousPoint.x * width, previousPoint.y * height)
+    context.lineTo(point.x * width, point.y * height)
+    context.stroke()
+  }
+
+  for (const point of pointerTrail) {
+    const ageRatio = Math.min(1, Math.max(0, (at - point.at) / RENDER_TRAIL_MS))
+    const alpha = Math.max(0.18, 1 - ageRatio)
+    const radius = POINTER_RADIUS * (0.7 + (1 - ageRatio) * 0.25)
+
+    context.fillStyle = `rgba(${POINTER_COLOR}, ${alpha})`
+    context.beginPath()
+    context.arc(point.x * width, point.y * height, radius, 0, Math.PI * 2)
+    context.fill()
+  }
+
+  context.restore()
 }
 
-function getExpectedGesture(): HandGestureName {
-  const context = handSequenceSnapshot.value.context
-
-  return context.sequence[context.stepIndex] ?? 'no_gesture'
-}
-
-function landmarkToCanvasPoint(
-  landmark: NormalizedLandmark,
+function drawRecognizedGestureStroke(
+  context: CanvasRenderingContext2D,
   width: number,
   height: number,
 ) {
-  return [landmark.x * width, landmark.y * height] as const
+  if (recognizedGesturePoints.length < 2) return
+
+  context.save()
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+  context.shadowColor = `rgba(${RECOGNIZED_STROKE_COLOR}, 0.45)`
+  context.shadowBlur = 8
+  context.strokeStyle = `rgba(${RECOGNIZED_STROKE_COLOR}, 0.96)`
+  context.lineWidth = RECOGNIZED_STROKE_LINE_WIDTH
+  context.beginPath()
+  context.moveTo(
+    recognizedGesturePoints[0].x * width,
+    recognizedGesturePoints[0].y * height,
+  )
+
+  for (let index = 1; index < recognizedGesturePoints.length; index += 1) {
+    const point = recognizedGesturePoints[index]
+    context.lineTo(point.x * width, point.y * height)
+  }
+
+  context.stroke()
+
+  context.fillStyle = `rgba(${RECOGNIZED_STROKE_COLOR}, 1)`
+  for (const point of recognizedGesturePoints) {
+    context.beginPath()
+    context.arc(
+      point.x * width,
+      point.y * height,
+      RECOGNIZED_STROKE_RADIUS,
+      0,
+      Math.PI * 2,
+    )
+    context.fill()
+  }
+
+  context.restore()
+}
+
+function drawStrokeGuides(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+) {
+  const strokePoints =
+    recognitionContext.state === 'stroke_ended'
+      ? recognitionContext.completedStrokePoints
+      : recognitionContext.strokePoints
+  const startPoint = recognitionContext.strokeAnchor ?? strokePoints[0]
+  const endPoint = strokePoints[strokePoints.length - 1]
+
+  context.save()
+  context.lineCap = 'round'
+
+  if (recognitionContext.state === 'ready_to_start' && startPoint) {
+    const x = startPoint.x * width
+    const y = startPoint.y * height
+    const radius = 20
+
+    context.lineWidth = 3
+    context.strokeStyle = 'rgba(56, 189, 248, 0.35)'
+    context.beginPath()
+    context.arc(x, y, radius, 0, Math.PI * 2)
+    context.stroke()
+
+    context.strokeStyle = 'rgba(56, 189, 248, 0.95)'
+    context.beginPath()
+    context.arc(
+      x,
+      y,
+      radius,
+      -Math.PI / 2,
+      -Math.PI / 2 + Math.PI * 2 * recognitionContext.strokeStartProgress,
+    )
+    context.stroke()
+  }
+
+  if (strokePoints.length > 1 && startPoint && endPoint) {
+    drawGuidePoint(context, startPoint.x * width, startPoint.y * height, '#38bdf8')
+    drawGuidePoint(context, endPoint.x * width, endPoint.y * height, '#facc15')
+  }
+
+  context.restore()
+}
+
+function drawGuidePoint(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  color: string,
+) {
+  context.fillStyle = color
+  context.strokeStyle = 'rgba(15, 23, 42, 0.85)'
+  context.lineWidth = 3
+  context.beginPath()
+  context.arc(x, y, 7, 0, Math.PI * 2)
+  context.fill()
+  context.stroke()
+}
+
+function drawConfirmationRing(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+) {
+  const point = pointerTrail[pointerTrail.length - 1]
+
+  if (!point || recognitionContext.confirmationProgress <= 0) return
+
+  const x = point.x * width
+  const y = point.y * height
+  const radius = 18
+
+  context.save()
+  context.lineWidth = 3
+  context.strokeStyle = 'rgba(34, 197, 94, 0.25)'
+  context.beginPath()
+  context.arc(x, y, radius, 0, Math.PI * 2)
+  context.stroke()
+
+  context.strokeStyle = 'rgba(34, 197, 94, 0.95)'
+  context.beginPath()
+  context.arc(
+    x,
+    y,
+    radius,
+    -Math.PI / 2,
+    -Math.PI / 2 + Math.PI * 2 * recognitionContext.confirmationProgress,
+  )
+  context.stroke()
+  context.restore()
+}
+
+function clearPointerTrail() {
+  pointerTrail = []
+  recognizedGesturePoints = []
+  trailPointCount.value = 0
+  isRightIndexVisible.value = false
+}
+
+function resetRecognition() {
+  recognitionContext = createRecognitionContext()
+  recognizedGesturePoints = []
+  recognitionState.value = recognitionContext.state
+  currentCandidateLabel.value = '없음'
+  confirmationPercent.value = 0
+  cooldownRemainingMs.value = 0
+  commandResultMessage.value = ''
+  strokeStartPercent.value = 0
+  strokeCapturePointCount.value = 0
+  strokeEndReasonText.value = '없음'
+  clearGestureCompletionNotice()
+}
+
+function updateRecognizedGesturePreview(
+  previousContext: typeof recognitionContext,
+  nextContext: typeof recognitionContext,
+) {
+  if (
+    previousContext.state === 'stroke_ended' &&
+    nextContext.state === 'candidate' &&
+    nextContext.candidate
+  ) {
+    const candidate = nextContext.candidate
+    const matchedPoints = previousContext.completedStrokePoints.filter((point) => {
+      return (
+        point.at >= candidate.gestureStartedAt &&
+        point.at <= candidate.gestureEndedAt
+      )
+    })
+
+    recognizedGesturePoints =
+      matchedPoints.length >= 2
+        ? matchedPoints
+        : [...previousContext.completedStrokePoints]
+    return
+  }
+
+  if (
+    nextContext.state === 'tracking' ||
+    nextContext.state === 'ready_to_start' ||
+    nextContext.state === 'drawing' ||
+    nextContext.state === 'cooldown' ||
+    nextContext.state === 'error'
+  ) {
+    recognizedGesturePoints = []
+  }
+}
+
+function syncRecognitionDisplay(now: number) {
+  const previousCandidateKey =
+    recognitionState.value === 'candidate'
+      ? recognitionContext.candidate?.gesture
+      : null
+
+  recognitionState.value = recognitionContext.state
+  currentCandidateLabel.value = recognitionContext.candidate
+    ? `${recognitionContext.candidate.gestureLabel} / ${recognitionContext.candidate.label}`
+    : '없음'
+  confirmationPercent.value = Math.round(
+    recognitionContext.confirmationProgress * 100,
+  )
+  cooldownRemainingMs.value = Math.max(0, recognitionContext.cooldownUntil - now)
+  strokeStartPercent.value = Math.round(
+    recognitionContext.strokeStartProgress * 100,
+  )
+  strokeCapturePointCount.value =
+    recognitionContext.state === 'stroke_ended'
+      ? recognitionContext.completedStrokePoints.length
+      : recognitionContext.strokePoints.length
+  strokeEndReasonText.value =
+    recognitionContext.strokeEndReason === 'idle'
+      ? '정지 종료'
+      : recognitionContext.strokeEndReason === 'timeout'
+        ? '시간 종료'
+        : '없음'
+
+  const currentCandidate = recognitionContext.candidate
+  if (
+    recognitionContext.state === 'candidate' &&
+    currentCandidate &&
+    previousCandidateKey !== currentCandidate.gesture
+  ) {
+    showGestureCompletionNotice(currentCandidate)
+  }
+
+  if (recognitionContext.errorMessage) {
+    errorMessage.value = recognitionContext.errorMessage
+  } else if (errorMessage.value && recognitionContext.state !== 'error') {
+    errorMessage.value = ''
+  }
+}
+
+function showGestureCompletionNotice(candidate: GestureCandidate) {
+  gestureCompletionNotice.value = `${candidate.gestureLabel} 완료`
+
+  if (gestureCompletionTimer) {
+    clearTimeout(gestureCompletionTimer)
+  }
+
+  gestureCompletionTimer = setTimeout(() => {
+    gestureCompletionNotice.value = ''
+    gestureCompletionTimer = null
+  }, 1600)
+}
+
+function clearGestureCompletionNotice() {
+  gestureCompletionNotice.value = ''
+
+  if (gestureCompletionTimer) {
+    clearTimeout(gestureCompletionTimer)
+    gestureCompletionTimer = null
+  }
+}
+
+async function executeCandidate(candidate: GestureCandidate) {
+  if (isExecutingRequest) return
+
+  isExecutingRequest = true
+  commandResultMessage.value = `${candidate.label} 요청 중`
+
+  try {
+    const response = await $fetch<OpenAppResponse>('/api/apps/open', {
+      method: 'POST',
+      body: {
+        app: candidate.app,
+        source: 'gesture',
+        gesture: candidate.gesture,
+        clientRequestId: `${candidate.gesture}-${candidate.app}-${Math.round(
+          candidate.detectedAt,
+        )}`,
+      },
+    })
+    const now = performance.now()
+
+    if (response.success) {
+      recognitionContext = markExecutionSuccess(recognitionContext, now)
+      commandResultMessage.value = `${candidate.label} 완료`
+    } else {
+      recognitionContext = markExecutionFailure(
+        recognitionContext,
+        now,
+        response.message,
+      )
+      commandResultMessage.value = `${candidate.label} 실패`
+    }
+
+    syncRecognitionDisplay(now)
+  } catch (error) {
+    const now = performance.now()
+    const message =
+      error instanceof Error ? error.message : '앱 실행 요청에 실패했습니다.'
+
+    recognitionContext = markExecutionFailure(recognitionContext, now, message)
+    commandResultMessage.value = `${candidate.label} 실패`
+    syncRecognitionDisplay(now)
+  } finally {
+    isExecutingRequest = false
+  }
 }
 
 onMounted(() => {
@@ -454,197 +610,170 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (completionToastTimer) {
-    clearTimeout(completionToastTimer)
-  }
-
+  clearGestureCompletionNotice()
   stopCamera()
 })
-
-watch(
-  () => handSequenceSnapshot.value.context.completedCount,
-  (completedCount, previousCompletedCount) => {
-    if (completedCount <= (previousCompletedCount ?? 0)) return
-
-    recordSequenceCompletion()
-  },
-)
 </script>
 
 <template>
-  <main class="grid min-h-svh grid-rows-[minmax(0,1fr)_auto] gap-4 box-border p-3 transition-colors md:p-6"
-    :class="pageBackgroundClass">
+  <main
+    class="grid min-h-svh grid-rows-[minmax(0,1fr)_auto] gap-4 box-border bg-slate-950 p-3 text-slate-50 md:p-6">
     <Transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="-translate-y-3 opacity-0"
+      enter-active-class="transition duration-150 ease-out"
+      enter-from-class="-translate-y-2 opacity-0"
       enter-to-class="translate-y-0 opacity-100"
-      leave-active-class="transition duration-200 ease-in"
+      leave-active-class="transition duration-150 ease-in"
       leave-from-class="translate-y-0 opacity-100"
-      leave-to-class="-translate-y-3 opacity-0">
+      leave-to-class="-translate-y-2 opacity-0">
       <div
-        v-if="completionToast"
-        class="fixed left-1/2 top-4 z-50 w-[min(calc(100vw_-_24px),420px)] -translate-x-1/2 rounded-lg border border-emerald-300 bg-white px-4 py-3 text-center shadow-lg dark:border-emerald-700 dark:bg-slate-950"
+        v-if="gestureCompletionNotice"
+        class="fixed left-1/2 top-4 z-50 w-[min(calc(100vw_-_24px),360px)] -translate-x-1/2 rounded-md border border-emerald-300 bg-slate-950/95 px-4 py-3 text-center shadow-xl shadow-emerald-950/40 backdrop-blur"
         role="status"
         aria-live="polite">
-        <div class="text-[11px] font-bold uppercase text-emerald-600 dark:text-emerald-400">
-          시퀀스 완료
+        <div class="text-[11px] font-bold uppercase text-emerald-300">
+          제스처 완료
         </div>
-        <div class="mt-1 truncate text-base font-bold text-slate-950 dark:text-slate-50">
-          {{ completionToast.sequenceLabel }}
+        <div class="mt-1 truncate text-sm font-black text-slate-50">
+          {{ gestureCompletionNotice }}
         </div>
       </div>
     </Transition>
 
     <div class="w-full max-w-[960px] self-center justify-self-center">
       <div
-        class="relative aspect-video w-full overflow-hidden rounded-t-lg border border-slate-200 bg-neutral-950 dark:border-slate-800 max-md:rounded-t-md">
-        <video ref="videoRef" muted playsinline class="block size-full scale-x-[-1] object-cover" />
-        <canvas ref="canvasRef" class="pointer-events-none absolute inset-0 block size-full scale-x-[-1]" />
+        class="relative aspect-video w-full overflow-hidden rounded-t-lg border border-slate-800 bg-neutral-950 max-md:rounded-t-md">
+        <video
+          ref="videoRef"
+          muted
+          playsinline
+          class="block size-full scale-x-[-1] object-cover" />
+        <canvas
+          ref="canvasRef"
+          class="pointer-events-none absolute inset-0 block size-full scale-x-[-1]" />
+        <section
+          class="pointer-events-none absolute bottom-3 left-3 right-3 rounded-md border border-slate-700/70 bg-slate-950/82 px-3 py-2 shadow-lg backdrop-blur-sm"
+          aria-label="인식 단계">
+          <div class="flex flex-wrap items-center gap-2">
+            <span
+              class="rounded bg-emerald-400 px-2 py-1 text-xs font-black text-slate-950">
+              {{ trackingStatus }}
+            </span>
+            <span class="min-w-0 truncate text-xs font-semibold text-slate-100">
+              {{ phaseGuideText }}
+            </span>
+          </div>
+        </section>
       </div>
 
       <dl
-        class="m-0 grid grid-cols-2 overflow-hidden rounded-b-lg border border-t-0 border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-800 md:grid-cols-4"
-        aria-label="손동작 시퀀스 상태">
-        <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+        class="m-0 grid grid-cols-2 overflow-hidden border-x border-b border-slate-800 bg-slate-900 md:grid-cols-7"
+        aria-label="손가락 명령 인식 상태">
+        <div class="min-w-0 px-3 py-2.5">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
             상태
           </dt>
-          <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
-            {{ getSequenceStateLabel(String(handSequenceSnapshot.value)) }}
+          <dd class="m-0 truncate text-sm font-semibold leading-tight">
+            {{ trackingStatus }}
           </dd>
         </div>
-        <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-            진행
+        <div class="min-w-0 px-3 py-2.5">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
+            후보
           </dt>
-          <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
-            {{ handSequenceSnapshot.context.stepIndex }} /
-            {{ handSequenceSnapshot.context.sequence.length }}
+          <dd class="m-0 truncate text-sm font-semibold leading-tight">
+            {{ currentCandidateLabel }}
           </dd>
         </div>
-        <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-            현재 인식
+        <div class="min-w-0 px-3 py-2.5">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
+            확인
           </dt>
-          <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
-            {{ getGestureLabel(currentRecognizedGesture) }}
+          <dd class="m-0 truncate text-sm font-semibold leading-tight">
+            {{ confirmationPercent }}%
           </dd>
         </div>
-        <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-            완료
+        <div class="min-w-0 px-3 py-2.5">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
+            시작
           </dt>
-          <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
-            {{ handSequenceSnapshot.context.completedCount }}
+          <dd class="m-0 truncate text-sm font-semibold leading-tight">
+            {{ strokeStartPercent }}%
+          </dd>
+        </div>
+        <div class="min-w-0 px-3 py-2.5">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
+            입력점
+          </dt>
+          <dd class="m-0 truncate text-sm font-semibold leading-tight">
+            {{ strokeCapturePointCount }}
+          </dd>
+        </div>
+        <div class="min-w-0 px-3 py-2.5">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
+            종료
+          </dt>
+          <dd class="m-0 truncate text-sm font-semibold leading-tight">
+            {{ strokeEndReasonText }}
+          </dd>
+        </div>
+        <div class="min-w-0 px-3 py-2.5">
+          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
+            쿨다운
+          </dt>
+          <dd class="m-0 truncate text-sm font-semibold leading-tight">
+            {{ cooldownSeconds > 0 ? `${cooldownSeconds}초` : '없음' }}
           </dd>
         </div>
       </dl>
 
       <div
-        class="flex flex-wrap items-center gap-2 border-x border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950">
-        <button v-for="(commandSequence, index) in handCommandSequences" :key="commandSequence.id" type="button"
-          class="h-8 rounded-md border px-2.5 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
-          :class="index === selectedSequenceIndex
-            ? 'border-blue-600 bg-blue-600 text-white'
-            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900'"
-          @click="selectCommandSequence(index)">
-          {{ commandSequence.label }}
-        </button>
-        <span class="ml-auto min-w-0 truncate text-xs font-semibold text-slate-500 dark:text-slate-400">
-          {{ selectedCommandSequence.label }}
-        </span>
+        class="rounded-b-lg border-x border-b border-slate-800 bg-slate-950 px-3 py-2">
+        <div class="mb-2 text-[11px] font-bold uppercase text-slate-500">
+          지원 제스처
+        </div>
+        <div class="grid gap-2 text-xs font-semibold text-slate-300 md:grid-cols-4">
+          <div
+            v-for="command in supportedGestureItems"
+            :key="command.gesture"
+            class="rounded-md border border-slate-800 bg-slate-900 px-2 py-1.5">
+            <div class="flex items-center gap-2 text-slate-50">
+              <span
+                class="grid size-6 shrink-0 place-items-center rounded bg-emerald-400 text-base font-black leading-none text-slate-950">
+                {{ command.mark }}
+              </span>
+              <span class="truncate">
+                {{ command.gestureLabel }}
+              </span>
+            </div>
+            <div class="mt-1 truncate pl-8 text-[11px] text-emerald-300">
+              {{ command.label }}
+            </div>
+          </div>
+        </div>
       </div>
-
-      <section
-        class="border-x border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
-        aria-label="Command sequences">
-        <div
-          class="grid grid-cols-[minmax(92px,0.9fr)_minmax(0,2fr)] border-b border-slate-200 px-3 py-2 text-[11px] font-bold uppercase text-slate-500 dark:border-slate-800 dark:text-slate-400">
-          <div>시퀀스</div>
-          <div>동작 순서</div>
-        </div>
-        <button
-          v-for="(commandSequence, index) in handCommandSequences"
-          :key="`sequence-row-${commandSequence.id}`"
-          type="button"
-          class="grid w-full grid-cols-[minmax(92px,0.9fr)_minmax(0,2fr)] items-center gap-2 border-b border-slate-100 px-3 py-2 text-left transition-colors last:border-b-0 focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-blue-500 dark:border-slate-900"
-          :class="index === selectedSequenceIndex
-            ? 'bg-blue-50 dark:bg-blue-950/40'
-            : 'hover:bg-slate-50 dark:hover:bg-slate-900'"
-          @click="selectCommandSequence(index)">
-          <span
-            class="min-w-0 truncate text-sm font-semibold"
-            :class="index === selectedSequenceIndex
-              ? 'text-blue-700 dark:text-blue-300'
-              : 'text-slate-950 dark:text-slate-50'">
-            {{ commandSequence.label }}
-          </span>
-          <span class="flex min-w-0 flex-wrap items-center gap-1.5">
-            <span
-              v-for="(gesture, gestureIndex) in getCommandSequenceSteps(commandSequence)"
-              :key="`${commandSequence.id}-${gesture}-${gestureIndex}`"
-              class="inline-flex h-7 max-w-full items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
-              {{ getGestureLabel(gesture) }}
-            </span>
-          </span>
-        </button>
-      </section>
-
-      <section
-        class="border-x border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
-        aria-label="완료 기록">
-        <div
-          class="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
-          <h2 class="m-0 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-            완료 기록
-          </h2>
-          <span class="text-xs font-semibold text-slate-500 dark:text-slate-400">
-            최근 {{ completionHistory.length }}개
-          </span>
-        </div>
-        <div
-          v-if="completionHistory.length === 0"
-          class="px-3 py-4 text-sm font-semibold text-slate-500 dark:text-slate-400">
-          아직 완료된 시퀀스가 없습니다.
-        </div>
-        <ol v-else class="m-0 list-none divide-y divide-slate-100 p-0 dark:divide-slate-900">
-          <li
-            v-for="entry in completionHistory"
-            :key="entry.id"
-            class="grid grid-cols-[minmax(82px,auto)_minmax(0,1fr)] gap-3 px-3 py-2">
-            <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              {{ formatCompletionTime(entry.completedAt) }}
-            </div>
-            <div class="min-w-0">
-              <div class="truncate text-sm font-bold text-slate-950 dark:text-slate-50">
-                {{ entry.sequenceLabel }}
-              </div>
-              <div class="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-                <span
-                  v-for="(gesture, gestureIndex) in entry.gestures"
-                  :key="`${entry.id}-${gesture}-${gestureIndex}`"
-                  class="inline-flex h-6 max-w-full items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
-                  {{ getGestureLabel(gesture) }}
-                </span>
-              </div>
-            </div>
-          </li>
-        </ol>
-      </section>
     </div>
 
     <div class="flex min-h-11 flex-wrap items-center justify-center gap-3">
-      <button v-if="!isCameraActive" type="button"
-        class="h-10 min-w-22 cursor-pointer rounded-md border border-slate-200 bg-white text-[15px] font-semibold leading-none text-slate-950 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50"
+      <button
+        v-if="!isCameraActive"
+        type="button"
+        class="h-10 min-w-22 cursor-pointer rounded-md border border-emerald-500 bg-emerald-500 px-4 text-[15px] font-semibold leading-none text-slate-950 hover:bg-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
         @click="startCamera">
         시작
       </button>
-      <button v-else type="button"
-        class="h-10 min-w-22 cursor-pointer rounded-md border border-slate-200 bg-white text-[15px] font-semibold leading-none text-slate-950 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50"
+      <button
+        v-else
+        type="button"
+        class="h-10 min-w-22 cursor-pointer rounded-md border border-slate-700 bg-slate-900 px-4 text-[15px] font-semibold leading-none text-slate-50 hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
         @click="stopCamera">
         정지
       </button>
-      <p v-if="errorMessage" class="max-w-[min(100%,640px)] text-sm text-orange-700">
+      <p
+        v-if="commandResultMessage"
+        class="max-w-[min(100%,640px)] text-sm font-semibold text-emerald-300">
+        {{ commandResultMessage }}
+      </p>
+      <p v-if="errorMessage" class="max-w-[min(100%,640px)] text-sm text-orange-300">
         {{ errorMessage }}
       </p>
     </div>

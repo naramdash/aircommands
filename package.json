@@ -7,16 +7,14 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "test:gestures": "node scripts/run-gesture-verification.mjs",
+    "test": "node scripts/run-tests.mjs",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",
     "@nuxt/ui": "^4.9.0",
     "@types/node": "^26.0.0",
-    "@xstate/vue": "^5.0.0",
     "nuxt": "^4.4.8",
-    "tailwindcss": "^4.3.1",
-    "xstate": "^5.32.1"
+    "tailwindcss": "^4.3.1"
   }
 }
