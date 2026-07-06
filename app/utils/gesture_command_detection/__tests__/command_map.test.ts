@@ -1,23 +1,72 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mapGestureToCommand } from '../command_map'
+import {
+  fingerDefinitions,
+  mapGestureToCommand,
+  oneHandTouchGestureCommands,
+  touchGestureCommands,
+  twoHandTouchGestureCommands,
+} from '../command_map'
 
-describe('command map', () => {
-  it('maps swipes to app commands', () => {
-    assert.deepEqual(mapGestureToCommand('swipe_up'), {
-      gesture: 'swipe_up',
-      gestureLabel: '검지 위로 스와이프',
-      label: 'Chrome 실행',
-      app: 'chrome',
-      mark: '↑',
-    })
-    assert.equal(mapGestureToCommand('swipe_right').app, 'vscode')
-    assert.equal(mapGestureToCommand('swipe_up_left').mark, '↖')
-    assert.equal(mapGestureToCommand('swipe_up_right').gestureLabel, '검지 오른쪽 위 대각선 스와이프')
-    assert.equal(mapGestureToCommand('swipe_down_left').app, 'notepad')
-    assert.equal(mapGestureToCommand('swipe_down_right').mark, '↘')
-    assert.equal(mapGestureToCommand('shape_v').mark, 'V')
-    assert.equal(mapGestureToCommand('shape_w').app, 'word')
-    assert.equal(mapGestureToCommand('shape_s').gestureLabel, '검지로 S 그리기')
+describe('touch command map', () => {
+  it('lists all 5 by 5 left/right finger touch commands', () => {
+    assert.equal(twoHandTouchGestureCommands.length, 25)
+    assert.equal(
+      new Set(twoHandTouchGestureCommands.map((item) => item.gesture)).size,
+      25,
+    )
+
+    for (const leftFinger of fingerDefinitions) {
+      for (const rightFinger of fingerDefinitions) {
+        const gesture =
+          `touch_left_${leftFinger.name}_right_${rightFinger.name}` as const
+        const command = mapGestureToCommand(gesture)
+
+        assert.equal(command.contactType, 'two_hand')
+        assert.equal(command.leftFinger, leftFinger.name)
+        assert.equal(command.rightFinger, rightFinger.name)
+        assert.equal(
+          command.gestureLabel,
+          `왼손 ${leftFinger.label} + 오른손 ${rightFinger.label}`,
+        )
+      }
+    }
+  })
+
+  it('lists one-hand thumb touch commands separately for each hand', () => {
+    assert.equal(oneHandTouchGestureCommands.length, 6)
+    assert.equal(touchGestureCommands.length, 31)
+    assert.deepEqual(
+      oneHandTouchGestureCommands.map((item) => item.gesture),
+      [
+        'touch_left_thumb_index',
+        'touch_left_thumb_middle',
+        'touch_left_thumb_ring',
+        'touch_right_thumb_index',
+        'touch_right_thumb_middle',
+        'touch_right_thumb_ring',
+      ],
+    )
+
+    const leftCommand = mapGestureToCommand('touch_left_thumb_ring')
+    const rightCommand = mapGestureToCommand('touch_right_thumb_ring')
+
+    assert.equal(leftCommand.contactType, 'one_hand')
+    assert.equal(leftCommand.hand, 'Left')
+    assert.equal(leftCommand.gestureLabel, '왼손 엄지 + 약지')
+    assert.equal(leftCommand.mark, '왼 엄+약')
+    assert.equal(rightCommand.contactType, 'one_hand')
+    assert.equal(rightCommand.hand, 'Right')
+    assert.equal(rightCommand.gestureLabel, '오른손 엄지 + 약지')
+    assert.equal(rightCommand.mark, '오 엄+약')
+  })
+
+  it('maps a touch gesture to an executable app command', () => {
+    const command = mapGestureToCommand('touch_left_thumb_right_index')
+
+    assert.equal(command.gesture, 'touch_left_thumb_right_index')
+    assert.equal(command.mark, '엄+검')
+    assert.equal(typeof command.label, 'string')
+    assert.equal(typeof command.app, 'string')
   })
 })

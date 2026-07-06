@@ -1,75 +1,38 @@
-# Nuxt Minimal Starter
+# AirCommands
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+AirCommands is a Nuxt app that uses MediaPipe Hand Landmarker to run local app
+commands from two-hand finger-touch gestures.
 
-## Setup
+The current interaction model is:
 
-Make sure to install dependencies:
+1. Show both hands to the camera.
+2. Touch one left-hand fingertip to one right-hand fingertip.
+3. Hold the contact briefly.
+4. The matching command is executed through the local server API.
+
+The app supports all `5 x 5` fingertip combinations:
+
+- left thumb/index/middle/ring/pinky
+- right thumb/index/middle/ring/pinky
+
+## Commands
 
 ```bash
-# npm
 npm install
-
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
-```
-
-## Development Server
-
-Start the development server on `http://localhost:3000`:
-
-```bash
-# npm
-npm run dev
-
-# pnpm
-pnpm dev
-
-# yarn
-yarn dev
-
-# bun
-bun run dev
-```
-
-## Production
-
-Build the application for production:
-
-```bash
-# npm
+npm run test
 npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
 ```
 
-Locally preview production build:
+Do not start the dev server automatically for verification. The repository
+instructions require static inspection, targeted tests, and production builds
+unless the user explicitly approves runtime browser verification.
 
-```bash
-# npm
-npm run preview
+## Key Files
 
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+- `app/app.vue`: camera UI, two-hand fingertip overlay, command execution flow
+- `app/utils/gesture_command_detection/touch_detection.ts`: 5x5 touch detection
+- `app/utils/gesture_command_detection/recognition_reducer.ts`: touch hold and cooldown state machine
+- `app/utils/gesture_command_detection/command_map.ts`: generated 25 gesture command list
+- `server/api/apps/open.post.ts`: app launch API
+- `server/utils/apps.ts`: allowlisted local apps
+- `docs/`: current product, architecture, recognition, API, and test documents

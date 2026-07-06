@@ -1,10 +1,6 @@
-import type {
-  Handedness,
-  HandednessCategory,
-  PointerTrailPoint,
-} from './types'
+import type { Handedness, HandednessCategory, Point2D } from './types'
 
-export function toUserFacingPoint(point: PointerTrailPoint): PointerTrailPoint {
+export function toUserFacingPoint<T extends Point2D>(point: T): T {
   return {
     ...point,
     x: 1 - point.x,
@@ -23,11 +19,23 @@ export function getHandedness(
   return 'Unknown'
 }
 
-export function getRightHandIndex(
+export function getHandIndex(
   handednesses: HandednessCategory[][] = [],
+  hand: Exclude<Handedness, 'Unknown'>,
 ) {
   return handednesses.findIndex((categories) => {
-    return getHandedness(categories) === 'Right'
+    return getHandedness(categories) === hand
   })
 }
 
+export function getLeftHandIndex(
+  handednesses: HandednessCategory[][] = [],
+) {
+  return getHandIndex(handednesses, 'Left')
+}
+
+export function getRightHandIndex(
+  handednesses: HandednessCategory[][] = [],
+) {
+  return getHandIndex(handednesses, 'Right')
+}

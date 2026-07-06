@@ -16,7 +16,7 @@ describe('openAppRequest', () => {
       {
         app: 'chrome',
         source: 'gesture',
-        gesture: 'swipe_up',
+        gesture: 'touch_left_thumb_right_index',
         clientRequestId: 'test-1',
       },
       {
@@ -95,4 +95,3 @@ describe('openAppRequest', () => {
     }
   })
 })
-

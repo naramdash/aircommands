@@ -7,36 +7,28 @@ export type HandednessCategory = {
   displayName?: string
 }
 
-export type PointerTrailPoint = {
+export type Point2D = {
   x: number
   y: number
-  at: number
+  z?: number
 }
 
-export type GestureName =
-  | 'swipe_up'
-  | 'swipe_down'
-  | 'swipe_left'
-  | 'swipe_right'
-  | 'swipe_up_left'
-  | 'swipe_up_right'
-  | 'swipe_down_left'
-  | 'swipe_down_right'
-  | 'shape_v'
-  | 'shape_w'
-  | 'shape_s'
+export type FingerName = 'thumb' | 'index' | 'middle' | 'ring' | 'pinky'
+export type OneHandTouchFingerName = 'index' | 'middle' | 'ring'
+export type OneHandTouchHand = 'left' | 'right'
 
-export type SwipeDirection =
-  | 'up'
-  | 'down'
-  | 'left'
-  | 'right'
-  | 'up_left'
-  | 'up_right'
-  | 'down_left'
-  | 'down_right'
+export type TwoHandTouchGestureName = `touch_left_${FingerName}_right_${FingerName}`
+export type OneHandTouchGestureName =
+  `touch_${OneHandTouchHand}_thumb_${OneHandTouchFingerName}`
 
-export type ShapeGesture = 'v' | 'w' | 's'
+export type GestureName = TwoHandTouchGestureName | OneHandTouchGestureName
+
+export type FingerDefinition = {
+  name: FingerName
+  label: string
+  shortLabel: string
+  landmarkIndex: number
+}
 
 export type AppName =
   | 'chrome'
@@ -47,13 +39,30 @@ export type AppName =
   | 'word'
   | 'spotify'
 
-export type GestureCommand = {
+export type BaseGestureCommand = {
   gesture: GestureName
   app: AppName
   label: string
   gestureLabel: string
   mark: string
 }
+
+export type TwoHandGestureCommand = BaseGestureCommand & {
+  contactType: 'two_hand'
+  gesture: TwoHandTouchGestureName
+  leftFinger: FingerName
+  rightFinger: FingerName
+}
+
+export type OneHandGestureCommand = BaseGestureCommand & {
+  contactType: 'one_hand'
+  gesture: OneHandTouchGestureName
+  hand: Exclude<Handedness, 'Unknown'>
+  primaryFinger: 'thumb'
+  secondaryFinger: OneHandTouchFingerName
+}
+
+export type GestureCommand = TwoHandGestureCommand | OneHandGestureCommand
 
 export type GestureCandidate = GestureCommand & {
   confidence: number
@@ -64,11 +73,8 @@ export type GestureCandidate = GestureCommand & {
 
 export type RecognitionState =
   | 'tracking'
-  | 'ready_to_start'
-  | 'drawing'
-  | 'stroke_ended'
+  | 'touching'
   | 'candidate'
-  | 'confirming'
   | 'executing'
   | 'cooldown'
   | 'error'
@@ -79,65 +85,45 @@ export type HandFrame = {
   at: number
 }
 
-export type SwipeDetectionResult =
-  | {
-      detected: true
-      gesture: Extract<
-        GestureName,
-        | 'swipe_up'
-        | 'swipe_down'
-        | 'swipe_left'
-        | 'swipe_right'
-        | 'swipe_up_left'
-        | 'swipe_up_right'
-        | 'swipe_down_left'
-        | 'swipe_down_right'
-      >
-      direction: SwipeDirection
-      confidence: number
-      startedAt: number
-      endedAt: number
-    }
-  | {
-      detected: false
-      reason:
-        | 'not_enough_points'
-        | 'too_short'
-        | 'too_slow'
-        | 'too_fast'
-        | 'too_diagonal'
-        | 'direction_unstable'
-    }
+export type FingerTip = {
+  finger: FingerName
+  label: string
+  shortLabel: string
+  point: Point2D
+}
 
-export type ShapeDetectionResult =
-  | {
-      detected: true
-      gesture: Extract<GestureName, 'shape_v' | 'shape_w' | 'shape_s'>
-      shape: ShapeGesture
-      confidence: number
-      startedAt: number
-      endedAt: number
-    }
-  | {
-      detected: false
-      reason:
-        | 'not_enough_points'
-        | 'too_short'
-        | 'too_slow'
-        | 'too_flat'
-        | 'too_line_like'
-        | 'low_confidence'
-    }
+export type HandPoseQuality = {
+  isAcceptable: boolean
+  reason: 'ok' | 'palm_edge_on' | 'fist_closed' | 'fingertips_overlapped'
+  projectedPalmQuality: number
+  fingertipSpread: number
+  foldedFingerCount: number
+}
 
-export type GestureDetectionResult =
-  | {
-      detected: true
-      gesture: GestureName
-      confidence: number
-      startedAt: number
-      endedAt: number
-    }
-  | {
-      detected: false
-      reason: SwipeDetectionResult['reason'] | ShapeDetectionResult['reason']
-    }
+export type TouchContact = {
+  gesture: GestureName
+  contactType: 'two_hand' | 'one_hand'
+  hand: Handedness | 'Both'
+  primaryFinger: FingerName
+  secondaryFinger: FingerName
+  leftFinger?: FingerName
+  rightFinger?: FingerName
+  leftPoint: Point2D
+  rightPoint: Point2D
+  primaryPoint: Point2D
+  secondaryPoint: Point2D
+  midpoint: Point2D
+  normalizedDistance: number
+  confidence: number
+}
+
+export type TwoHandTouchFrame = {
+  at: number
+  leftHandVisible: boolean
+  rightHandVisible: boolean
+  leftTips: FingerTip[]
+  rightTips: FingerTip[]
+  leftPoseQuality: HandPoseQuality | null
+  rightPoseQuality: HandPoseQuality | null
+  closestContact: TouchContact | null
+}

@@ -1,49 +1,48 @@
 # AirCommands 문서 인덱스
 
-이 폴더는 손가락 제스처로 명령을 인식하고 서버 API를 통해 로컬 애플리케이션을 실행하는 기능을 구현하기 위한 실행 문서 세트다.
+이 문서 세트는 현재 코드 기준의 양손 손가락 접촉 명령 시스템을 설명한다.
 
-목표는 "나중에 이 문서만 보고도 구현 가능한 수준"이다. 코드가 바뀌어도 아래 문서의 순서대로 확인하면 요구사항, 설계, API, 구현 단계, 테스트 기준을 다시 복원할 수 있어야 한다.
+현재 구현은 오른손 검지 궤적, swipe, V/W/S shape 인식이 아니다. 왼손
+5개 fingertip과 오른손 5개 fingertip의 접촉 조합 `5 x 5 = 25개`와,
+한 손의 `엄지 + 검지/중지/약지` 접촉 3개를 지원한다. 접촉 유지 시간이
+충족되면 서버 API로 allowlisted 앱을 실행한다.
 
 ## 읽는 순서
 
 1. [finger-gesture-command-plan.md](./finger-gesture-command-plan.md)
-   - 전체 기획 요약, MVP 범위, 구현 단계 개요.
+   - 전체 기획 요약과 현재 MVP 방향.
 2. [01-product-requirements.md](./01-product-requirements.md)
-   - 사용자 목표, MVP 요구사항, 제외 범위, 완료 정의.
+   - 사용자 목표, 지원 제스처, 완료 정의.
 3. [02-system-architecture.md](./02-system-architecture.md)
-   - 현재 코드 기준 시스템 구조, 데이터 흐름, 모듈 경계.
+   - 클라이언트/서버 모듈 구조와 데이터 흐름.
 4. [03-gesture-recognition-spec.md](./03-gesture-recognition-spec.md)
-   - 오른손 검지 기반 제스처 인식 알고리즘, 좌표계, threshold, 상태 안정화.
+   - 양손 fingertip 접촉 인식 알고리즘.
 5. [04-client-implementation-spec.md](./04-client-implementation-spec.md)
-   - Nuxt/Vue 클라이언트 구현 타입, 함수, 상태 전이, UI 사양.
+   - Nuxt/Vue 클라이언트 구현 상세.
 6. [05-server-api-spec.md](./05-server-api-spec.md)
-   - 앱 실행 서버 API 계약, allowlist, 중복 방지, 오류 응답.
+   - 앱 실행 API 계약과 allowlist.
 7. [06-implementation-roadmap.md](./06-implementation-roadmap.md)
-   - 구현 순서, 커밋 단위, 파일별 작업 목록.
+   - 현재 구현 단계와 이후 작업.
 8. [07-test-and-verification-plan.md](./07-test-and-verification-plan.md)
-   - 단위 테스트, API 테스트, 수동 카메라 검증 절차.
+   - 자동 테스트와 수동 카메라 검증 기준.
 9. [08-self-review-and-hardening.md](./08-self-review-and-hardening.md)
-   - 완성되었다고 판단한 뒤 다시 보강해야 할 점과 최종 점검표.
+   - 남은 리스크와 하드닝 체크리스트.
 10. [09-stroke-lifecycle-recognition.md](./09-stroke-lifecycle-recognition.md)
-   - 명시적 시작 가능/입력 중/종료 감지 상태와 stroke 기반 경로 인식 규칙.
+   - 이름은 유지하지만, 현재는 touch lifecycle 문서다.
 11. [10-gesture-bias-rebuttal.md](./10-gesture-bias-rebuttal.md)
-   - 위 스와이프와 V/W/S 인식 난이도 차이에 대한 20회 반박 검토와 보강 결과.
+   - 궤적 기반 인식을 버리고 접촉 기반으로 전환한 판단 기록.
+12. [11-planar-overlap-and-depth-hardening.md](./11-planar-overlap-and-depth-hardening.md)
+   - 손가락이 화면 평면에서 겹쳐 보이는 자세의 한계와 깊이/자세 품질 개선안.
+13. [12-fist-pose-hold-policy.md](./12-fist-pose-hold-policy.md)
+   - 주먹처럼 손가락이 접힌 폐쇄 손 자세를 보류하는 기준과 구현 정책.
 
 ## 현재 코드 기준 사실
 
 - 클라이언트 진입점은 [../app/app.vue](../app/app.vue)이다.
-- 현재 클라이언트는 오른손 검지 끝 landmark 8번을 추적하고 최근 5초의 경로를 Canvas 2D API로 그린다.
-- 제스처 인식은 `ready_to_start -> drawing -> stroke_ended -> candidate` lifecycle을 거친다.
-- V/W/S 모양 인식은 전체 stroke 템플릿, 앞뒤 마진 trim, 꺾임 구조 판정을 함께 사용한다.
-- MediaPipe 초기화는 [../app/utils/hand_landmark_detection.ts](../app/utils/hand_landmark_detection.ts)에 있다.
-- 현재 서버 앱 실행 API는 [../server/api/open-chrome.post.ts](../server/api/open-chrome.post.ts)에 있다.
+- MediaPipe `HandLandmarker`는 `numHands: 2`로 초기화된다.
+- 접촉 인식은 [../app/utils/gesture_command_detection/touch_detection.ts](../app/utils/gesture_command_detection/touch_detection.ts)에 있다.
+- 인식 상태 머신은 [../app/utils/gesture_command_detection/recognition_reducer.ts](../app/utils/gesture_command_detection/recognition_reducer.ts)에 있다.
+- 지원 제스처 목록은 [../app/utils/gesture_command_detection/command_map.ts](../app/utils/gesture_command_detection/command_map.ts)에서 생성된다.
+- 서버 앱 실행 API는 [../server/api/apps/open.post.ts](../server/api/apps/open.post.ts)이다.
 - 앱 allowlist는 [../server/utils/apps.ts](../server/utils/apps.ts)에 있다.
 - 자동 dev server 실행은 금지되어 있다. 런타임 검증이 필요하면 사용자에게 먼저 허락을 받아야 한다.
-
-## 구현 원칙
-
-- 손가락 제스처 후보가 잡혀도 즉시 앱을 실행하지 않는다.
-- 후보 명령을 화면에 표시하고 별도 확인 동작을 거친 뒤 서버 API를 호출한다.
-- 서버는 allowlist에 있는 앱만 실행한다.
-- 클라이언트와 서버 모두 중복 실행 방지 장치를 가진다.
-- 카메라/MediaPipe 기반 로직은 실제 런타임 오차가 크므로 순수 함수 단위 테스트와 수동 검증을 분리한다.
