@@ -44,10 +44,6 @@ export function reduceRecognitionFrame(
   frame: TwoHandTouchFrame | null,
   now: number,
 ): RecognitionFrameResult {
-  if (context.state === 'executing') {
-    return { context, executionCandidate: null }
-  }
-
   if (context.cooldownUntil > now) {
     return {
       context: {
@@ -116,8 +112,9 @@ export function reduceRecognitionFrame(
     return {
       context: {
         ...resetTouch(context),
-        state: 'executing',
-        candidate,
+        state: 'cooldown',
+        lastExecutedAt: now,
+        cooldownUntil: now + COOLDOWN_MS,
         errorMessage: '',
       },
       executionCandidate: candidate,

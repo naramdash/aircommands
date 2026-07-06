@@ -36,17 +36,18 @@ describe('touch recognition reducer', () => {
       TOUCH_HOLD_MS + 1,
     )
 
-    assert.equal(completedResult.context.state, 'executing')
+    assert.equal(completedResult.context.state, 'cooldown')
+    assert.equal(
+      completedResult.context.cooldownUntil,
+      TOUCH_HOLD_MS + 1 + COOLDOWN_MS,
+    )
     assert.equal(
       completedResult.executionCandidate?.gesture,
       'touch_left_thumb_right_index',
     )
     assert.equal(completedResult.context.activeTouch, null)
     assert.equal(completedResult.context.touchProgress, 0)
-    assert.equal(
-      completedResult.context.candidate?.gesture,
-      'touch_left_thumb_right_index',
-    )
+    assert.equal(completedResult.context.candidate, null)
   })
 
   it('resets if the touch disappears before hold completion', () => {
@@ -95,7 +96,7 @@ describe('touch recognition reducer', () => {
       TOUCH_HOLD_MS + 1,
     )
 
-    assert.equal(result.context.state, 'executing')
+    assert.equal(result.context.state, 'cooldown')
     assert.equal(result.executionCandidate?.gesture, 'touch_right_thumb_index')
   })
 })

@@ -8,8 +8,6 @@ import {
 } from './utils/gesture_command_detection/command_map'
 import {
   createRecognitionContext,
-  markExecutionFailure,
-  markExecutionSuccess,
   reduceRecognitionFrame,
 } from './utils/gesture_command_detection/recognition_reducer'
 import { getTwoHandTouchFrame } from './utils/gesture_command_detection/touch_detection'
@@ -45,6 +43,7 @@ const ACTIVE_FINGER_RADIUS = 8
 const TOUCH_COLOR = '250, 204, 21'
 const TOUCH_SUCCESS_COLOR = '34, 197, 94'
 const TOUCH_SUCCESS_HIGHLIGHT_MS = 900
+const EXECUTION_REQUEST_TIMEOUT_MS = 2500
 const FINGER_COLORS: Record<FingerName, string> = {
   thumb: '239, 68, 68',
   index: '34, 197, 94',
@@ -182,7 +181,6 @@ function getAppShortLabel(label: string) {
 let mediaStream: MediaStream | null = null
 let animationFrameId = 0
 let recognitionContext = createRecognitionContext()
-let isExecutingRequest = false
 let gestureCompletionTimer: ReturnType<typeof setTimeout> | null = null
 let successfulTouchContact: TouchContact | null = null
 let successfulTouchUntil = 0
@@ -603,14 +601,16 @@ function clearGestureCompletionNotice() {
 }
 
 async function executeCandidate(candidate: GestureCandidate) {
-  if (isExecutingRequest) return
-
-  isExecutingRequest = true
   commandResultMessage.value = `${candidate.label} 요청 중`
+  const abortController = new AbortController()
+  const timeoutId = window.setTimeout(() => {
+    abortController.abort()
+  }, EXECUTION_REQUEST_TIMEOUT_MS)
 
   try {
     const response = await $fetch<OpenAppResponse>('/api/apps/open', {
       method: 'POST',
+      signal: abortController.signal,
       body: {
         app: candidate.app,
         source: 'gesture',
@@ -620,34 +620,24 @@ async function executeCandidate(candidate: GestureCandidate) {
         )}`,
       },
     })
-    const now = performance.now()
 
     if (response.success) {
-      recognitionContext = markExecutionSuccess(recognitionContext, now)
       commandResultMessage.value = `${candidate.label} 완료`
     } else {
-      recognitionContext = markExecutionFailure(
-        recognitionContext,
-        now,
-        response.message,
-      )
       commandResultMessage.value = `${candidate.label} 실패`
+      errorMessage.value = response.message
     }
-
-    recognitionState.value = recognitionContext.state
-    cooldownRemainingMs.value = Math.max(0, recognitionContext.cooldownUntil - now)
   } catch (error) {
-    const now = performance.now()
-    const message =
-      error instanceof Error ? error.message : '앱 실행 요청에 실패했습니다.'
+    const message = abortController.signal.aborted
+      ? '앱 실행 요청이 지연되어 인식 흐름에서 분리했습니다.'
+      : error instanceof Error
+        ? error.message
+        : '앱 실행 요청에 실패했습니다.'
 
-    recognitionContext = markExecutionFailure(recognitionContext, now, message)
     commandResultMessage.value = `${candidate.label} 실패`
-    recognitionState.value = recognitionContext.state
-    cooldownRemainingMs.value = Math.max(0, recognitionContext.cooldownUntil - now)
     errorMessage.value = message
   } finally {
-    isExecutingRequest = false
+    window.clearTimeout(timeoutId)
   }
 }
 
