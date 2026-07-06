@@ -1,3 +1,5 @@
+/// <reference types="bun" />
+
 import { openAppRequest } from '../../utils/open_app'
 
 export default defineEventHandler(async (event) => {
@@ -21,4 +23,3 @@ export default defineEventHandler(async (event) => {
 
   return response
 })
-

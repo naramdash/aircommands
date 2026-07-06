@@ -1,4 +1,4 @@
-import { exec } from 'child_process'
+import { exec } from 'node:child_process'
 
 export type CommandResult =
   | { success: true }
@@ -19,4 +19,3 @@ export function runAppCommand(command: string): Promise<CommandResult> {
     })
   })
 }
-
