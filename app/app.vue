@@ -143,12 +143,12 @@ const statusColor = computed(() => {
 })
 const trackingStatus = computed(() => {
   if (!isCameraActive.value) return '카메라 대기'
-  if (!isLeftHandVisible.value && !isRightHandVisible.value) return '손 대기'
-  if (poseWarning.value) return '자세 보류'
-  if (recognitionState.value === 'touching') return '접촉 감지'
   if (recognitionState.value === 'executing') return '실행 중'
   if (recognitionState.value === 'cooldown') return '쿨다운'
   if (recognitionState.value === 'error') return '오류'
+  if (!isLeftHandVisible.value && !isRightHandVisible.value) return '손 대기'
+  if (poseWarning.value) return '자세 보류'
+  if (recognitionState.value === 'touching') return '접촉 감지'
 
   if (isLeftHandVisible.value && !isRightHandVisible.value) return '왼손 감지'
   if (!isLeftHandVisible.value && isRightHandVisible.value) return '오른손 감지'
@@ -527,23 +527,22 @@ function syncRecognitionDisplay(frame: TwoHandTouchFrame, now: number) {
   isRightHandVisible.value = frame.rightHandVisible
   poseWarning.value = getPoseWarning(frame)
   recognitionState.value = recognitionContext.state
+  const visibleContact =
+    frame.leftHandVisible || frame.rightHandVisible
+      ? recognitionContext.activeTouch ?? frame.closestContact
+      : null
+
   currentCandidateLabel.value = recognitionContext.candidate
     ? `${recognitionContext.candidate.gestureLabel} / ${recognitionContext.candidate.label}`
     : '없음'
-  currentTouchLabel.value = recognitionContext.activeTouch
-    ? `${getTouchLabel(recognitionContext.activeTouch)}`
-    : frame.closestContact
-      ? getTouchLabel(frame.closestContact)
-      : '없음'
-  currentTouchGesture.value =
-    recognitionContext.activeTouch?.gesture ?? frame.closestContact?.gesture ?? ''
-  touchProgressPercent.value = Math.round(recognitionContext.touchProgress * 100)
-  touchDistanceText.value =
-    recognitionContext.activeTouch || frame.closestContact
-      ? `${(
-          recognitionContext.activeTouch ?? frame.closestContact
-        )?.normalizedDistance.toFixed(2)}`
-      : '없음'
+  currentTouchLabel.value = visibleContact ? getTouchLabel(visibleContact) : '없음'
+  currentTouchGesture.value = visibleContact?.gesture ?? ''
+  touchProgressPercent.value = visibleContact
+    ? Math.round(recognitionContext.touchProgress * 100)
+    : 0
+  touchDistanceText.value = visibleContact
+    ? `${visibleContact.normalizedDistance.toFixed(2)}`
+    : '없음'
   cooldownRemainingMs.value = Math.max(0, recognitionContext.cooldownUntil - now)
 
   if (recognitionContext.errorMessage) {

@@ -115,11 +115,9 @@ export function reduceRecognitionFrame(
 
     return {
       context: {
-        ...context,
+        ...resetTouch(context),
         state: 'executing',
         candidate,
-        activeTouch: contact,
-        touchProgress: 1,
         errorMessage: '',
       },
       executionCandidate: candidate,

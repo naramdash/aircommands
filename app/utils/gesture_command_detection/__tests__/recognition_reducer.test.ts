@@ -41,6 +41,12 @@ describe('touch recognition reducer', () => {
       completedResult.executionCandidate?.gesture,
       'touch_left_thumb_right_index',
     )
+    assert.equal(completedResult.context.activeTouch, null)
+    assert.equal(completedResult.context.touchProgress, 0)
+    assert.equal(
+      completedResult.context.candidate?.gesture,
+      'touch_left_thumb_right_index',
+    )
   })
 
   it('resets if the touch disappears before hold completion', () => {
