@@ -7,6 +7,7 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
+    "test:gestures": "node scripts/run-gesture-verification.mjs",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {

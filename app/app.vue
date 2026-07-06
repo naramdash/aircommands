@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { HandLandmarker, type NormalizedLandmark } from '@mediapipe/tasks-vision'
 import { useMachine } from '@xstate/vue'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { classifyHandGesture } from './utils/hand_gesture_detection'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { handCommandSequences } from './utils/hand_command_sequences'
+import type { HandCommandSequence } from './utils/hand_command_sequences'
+import {
+  classifyHandGesture,
+  mirrorLandmarksHorizontally,
+} from './utils/hand_gesture_detection'
 import { handLandmarker } from './utils/hand_landmark_detection'
 import {
   handSequenceStateMachine,
@@ -16,16 +21,61 @@ type HandednessCategory = {
   displayName?: string
 }
 
+type GestureSample = {
+  gesture: HandGestureName
+  at: number
+}
+
+type CompletionLogEntry = {
+  id: string
+  sequenceLabel: string
+  gestures: HandGestureName[]
+  completedAt: number
+  completedCount: number
+}
+
+const GESTURE_WINDOW_MS = 160
+const GESTURE_WINDOW_MIN_SAMPLES = 2
+const GESTURE_WINDOW_MIN_RATIO = 0.6
 const videoRef = ref<HTMLVideoElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const errorMessage = ref('')
 const isCameraActive = ref(false)
+const selectedSequenceIndex = ref(0)
+const currentRecognizedGesture = ref<HandGestureName>('no_gesture')
+const completionHistory = ref<CompletionLogEntry[]>([])
+const completionToast = ref<CompletionLogEntry | null>(null)
 const { snapshot: handSequenceSnapshot, send: sendHandSequenceEvent } =
   useMachine(handSequenceStateMachine, {
     input: {
-      sequence: ['gesture_thumb_only'],
+      sequence: handCommandSequences[0]?.sequence,
     },
   })
+const selectedCommandSequence = computed(() => {
+  return handCommandSequences[selectedSequenceIndex.value] ?? handCommandSequences[0]
+})
+const gestureLabels: Record<string, string> = {
+  gesture_fist: '주먹',
+  gesture_open: '손 펴기',
+  gesture_thumb_up: '엄지 위',
+  gesture_thumb_down: '엄지 아래',
+  gesture_thumb_left: '엄지 왼쪽',
+  gesture_thumb_right: '엄지 오른쪽',
+  gesture_thumb_only: '엄지만 펼침',
+  gesture_index_point: '검지',
+  gesture_middle_point: '중지',
+  gesture_pinky_point: '새끼',
+  gesture_peace: '브이',
+  gesture_rock: '락',
+  gesture_three: '세 손가락',
+  no_gesture: '인식 없음',
+}
+const sequenceStateLabels: Record<string, string> = {
+  no_gesture: '대기 중',
+  start_gesture: '시작 동작 인식',
+  sequence_gesture: '중간 동작 인식',
+  end_gesture: '완료 동작 인식',
+}
 const completedBackgroundClasses = [
   'bg-red-600',
   'bg-orange-500',
@@ -49,6 +99,10 @@ const pageBackgroundClass = computed(() => {
 
 let mediaStream: MediaStream | null = null
 let animationFrameId = 0
+let gestureSamples: GestureSample[] = []
+let stableGesture: HandGestureName = 'no_gesture'
+let stableGestureSeenAt = 0
+let completionToastTimer: ReturnType<typeof setTimeout> | null = null
 
 async function startCamera() {
   errorMessage.value = ''
@@ -87,6 +141,7 @@ function stopCamera() {
   mediaStream?.getTracks().forEach((track) => track.stop())
   mediaStream = null
   isCameraActive.value = false
+  resetGestureStabilizer()
 
   const video = videoRef.value
   if (video) {
@@ -198,6 +253,103 @@ function getHandColors(handedness: Handedness) {
   }
 }
 
+function selectCommandSequence(index: number) {
+  const commandSequence = handCommandSequences[index]
+
+  if (!commandSequence) return
+
+  selectedSequenceIndex.value = index
+  resetGestureStabilizer()
+  sendHandSequenceEvent({
+    type: 'SET_SEQUENCE',
+    sequence: commandSequence.sequence,
+  })
+}
+
+function getCommandSequenceSteps(commandSequence: HandCommandSequence) {
+  return ['gesture_fist', ...commandSequence.sequence, 'gesture_open']
+}
+
+function getGestureLabel(gesture: HandGestureName) {
+  return gestureLabels[gesture] ?? gesture
+}
+
+function getSequenceStateLabel(state: string) {
+  return sequenceStateLabels[state] ?? state
+}
+
+function getCompletedSequenceLabel(gestures: HandGestureName[]) {
+  const completedMiddleGestures = getMiddleGestures(gestures)
+  const commandSequence = handCommandSequences.find((sequence) =>
+    areGestureSequencesEqual(sequence.sequence, completedMiddleGestures),
+  )
+
+  if (commandSequence) return commandSequence.label
+
+  return completedMiddleGestures.length
+    ? completedMiddleGestures.map(getGestureLabel).join(' ')
+    : gestures.map(getGestureLabel).join(' ')
+}
+
+function getMiddleGestures(gestures: HandGestureName[]) {
+  const middleGestures = [...gestures]
+
+  if (middleGestures[0] === 'gesture_fist') {
+    middleGestures.shift()
+  }
+
+  if (middleGestures[middleGestures.length - 1] === 'gesture_open') {
+    middleGestures.pop()
+  }
+
+  return middleGestures
+}
+
+function areGestureSequencesEqual(
+  first: HandGestureName[],
+  second: HandGestureName[],
+) {
+  return (
+    first.length === second.length &&
+    first.every((gesture, index) => gesture === second[index])
+  )
+}
+
+function formatCompletionTime(completedAt: number) {
+  return new Intl.DateTimeFormat('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(completedAt)
+}
+
+function recordSequenceCompletion() {
+  const context = handSequenceSnapshot.value.context
+  const gestures = context.lastCompletedSequence.length
+    ? [...context.lastCompletedSequence]
+    : [...context.sequence]
+  const completedAt = Date.now()
+  const entry: CompletionLogEntry = {
+    id: `${completedAt}-${context.completedCount}`,
+    sequenceLabel: getCompletedSequenceLabel(gestures),
+    gestures,
+    completedAt,
+    completedCount: context.completedCount,
+  }
+
+  completionHistory.value = [entry, ...completionHistory.value].slice(0, 20)
+  completionToast.value = entry
+
+  if (completionToastTimer) {
+    clearTimeout(completionToastTimer)
+  }
+
+  completionToastTimer = setTimeout(() => {
+    completionToast.value = null
+    completionToastTimer = null
+  }, 1800)
+}
+
 function sendRecognizedGesture(
   hands: NormalizedLandmark[][],
   handednesses: HandednessCategory[][] = [],
@@ -208,6 +360,7 @@ function sendRecognizedGesture(
   })
 
   if (rightHandIndex === -1) {
+    resetGestureStabilizer()
     sendHandSequenceEvent({
       type: 'GESTURE_FRAME',
       gesture: 'no_gesture',
@@ -217,12 +370,69 @@ function sendRecognizedGesture(
     return
   }
 
+  const userFacingLandmarks = mirrorLandmarksHorizontally(hands[rightHandIndex])
+  const rawGesture = classifyHandGesture(userFacingLandmarks, getExpectedGesture())
+  const recognizedGesture = stabilizeGesture(rawGesture, at)
+
+  currentRecognizedGesture.value = recognizedGesture
+
   sendHandSequenceEvent({
     type: 'GESTURE_FRAME',
-    gesture: classifyHandGesture(hands[rightHandIndex], getExpectedGesture()),
+    gesture: recognizedGesture,
     hand: getHandedness(handednesses[rightHandIndex]),
     at,
   })
+}
+
+function stabilizeGesture(gesture: HandGestureName, at: number): HandGestureName {
+  gestureSamples.push({ gesture, at })
+  gestureSamples = gestureSamples.filter(
+    (sample) => at - sample.at <= GESTURE_WINDOW_MS,
+  )
+
+  if (gestureSamples.length < GESTURE_WINDOW_MIN_SAMPLES) {
+    return stableGesture
+  }
+
+  const counts = new Map<HandGestureName, number>()
+
+  for (const sample of gestureSamples) {
+    counts.set(sample.gesture, (counts.get(sample.gesture) ?? 0) + 1)
+  }
+
+  let dominantGesture: HandGestureName = 'no_gesture'
+  let dominantCount = 0
+
+  for (const [sampleGesture, count] of counts) {
+    if (count > dominantCount) {
+      dominantGesture = sampleGesture
+      dominantCount = count
+    }
+  }
+
+  if (dominantCount / gestureSamples.length >= GESTURE_WINDOW_MIN_RATIO) {
+    stableGesture = dominantGesture
+    stableGestureSeenAt = at
+    return stableGesture
+  }
+
+  if (
+    stableGesture !== 'no_gesture' &&
+    at - stableGestureSeenAt <= GESTURE_WINDOW_MS
+  ) {
+    return stableGesture
+  }
+
+  stableGesture = 'no_gesture'
+  stableGestureSeenAt = at
+  return stableGesture
+}
+
+function resetGestureStabilizer() {
+  gestureSamples = []
+  stableGesture = 'no_gesture'
+  stableGestureSeenAt = 0
+  currentRecognizedGesture.value = 'no_gesture'
 }
 
 function getExpectedGesture(): HandGestureName {
@@ -244,13 +454,47 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (completionToastTimer) {
+    clearTimeout(completionToastTimer)
+  }
+
   stopCamera()
 })
+
+watch(
+  () => handSequenceSnapshot.value.context.completedCount,
+  (completedCount, previousCompletedCount) => {
+    if (completedCount <= (previousCompletedCount ?? 0)) return
+
+    recordSequenceCompletion()
+  },
+)
 </script>
 
 <template>
   <main class="grid min-h-svh grid-rows-[minmax(0,1fr)_auto] gap-4 box-border p-3 transition-colors md:p-6"
     :class="pageBackgroundClass">
+    <Transition
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="-translate-y-3 opacity-0"
+      enter-to-class="translate-y-0 opacity-100"
+      leave-active-class="transition duration-200 ease-in"
+      leave-from-class="translate-y-0 opacity-100"
+      leave-to-class="-translate-y-3 opacity-0">
+      <div
+        v-if="completionToast"
+        class="fixed left-1/2 top-4 z-50 w-[min(calc(100vw_-_24px),420px)] -translate-x-1/2 rounded-lg border border-emerald-300 bg-white px-4 py-3 text-center shadow-lg dark:border-emerald-700 dark:bg-slate-950"
+        role="status"
+        aria-live="polite">
+        <div class="text-[11px] font-bold uppercase text-emerald-600 dark:text-emerald-400">
+          시퀀스 완료
+        </div>
+        <div class="mt-1 truncate text-base font-bold text-slate-950 dark:text-slate-50">
+          {{ completionToast.sequenceLabel }}
+        </div>
+      </div>
+    </Transition>
+
     <div class="w-full max-w-[960px] self-center justify-self-center">
       <div
         class="relative aspect-video w-full overflow-hidden rounded-t-lg border border-slate-200 bg-neutral-950 dark:border-slate-800 max-md:rounded-t-md">
@@ -259,19 +503,19 @@ onBeforeUnmount(() => {
       </div>
 
       <dl
-        class="m-0 grid grid-cols-2 overflow-hidden rounded-b-lg border border-t-0 border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-800 md:grid-cols-5"
-        aria-label="Hand sequence state">
+        class="m-0 grid grid-cols-2 overflow-hidden rounded-b-lg border border-t-0 border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-800 md:grid-cols-4"
+        aria-label="손동작 시퀀스 상태">
         <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
           <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-            State
+            상태
           </dt>
           <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
-            {{ handSequenceSnapshot.value }}
+            {{ getSequenceStateLabel(String(handSequenceSnapshot.value)) }}
           </dd>
         </div>
         <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
           <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-            Progress
+            진행
           </dt>
           <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
             {{ handSequenceSnapshot.context.stepIndex }} /
@@ -280,46 +524,125 @@ onBeforeUnmount(() => {
         </div>
         <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
           <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-            Expected
+            현재 인식
           </dt>
           <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
-            {{
-              handSequenceSnapshot.context.sequence[
-              handSequenceSnapshot.context.stepIndex
-              ] ?? 'done'
-            }}
+            {{ getGestureLabel(currentRecognizedGesture) }}
           </dd>
         </div>
         <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
           <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-            Candidate
-          </dt>
-          <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
-            {{ handSequenceSnapshot.context.candidateHand }}
-            {{ handSequenceSnapshot.context.candidateGesture }}
-          </dd>
-        </div>
-        <div class="min-w-0 bg-white px-3 py-2.5 dark:bg-slate-950">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-            Completed
+            완료
           </dt>
           <dd class="m-0 truncate text-sm font-semibold leading-tight text-slate-950 dark:text-slate-50">
             {{ handSequenceSnapshot.context.completedCount }}
           </dd>
         </div>
       </dl>
+
+      <div
+        class="flex flex-wrap items-center gap-2 border-x border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950">
+        <button v-for="(commandSequence, index) in handCommandSequences" :key="commandSequence.id" type="button"
+          class="h-8 rounded-md border px-2.5 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          :class="index === selectedSequenceIndex
+            ? 'border-blue-600 bg-blue-600 text-white'
+            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900'"
+          @click="selectCommandSequence(index)">
+          {{ commandSequence.label }}
+        </button>
+        <span class="ml-auto min-w-0 truncate text-xs font-semibold text-slate-500 dark:text-slate-400">
+          {{ selectedCommandSequence.label }}
+        </span>
+      </div>
+
+      <section
+        class="border-x border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
+        aria-label="Command sequences">
+        <div
+          class="grid grid-cols-[minmax(92px,0.9fr)_minmax(0,2fr)] border-b border-slate-200 px-3 py-2 text-[11px] font-bold uppercase text-slate-500 dark:border-slate-800 dark:text-slate-400">
+          <div>시퀀스</div>
+          <div>동작 순서</div>
+        </div>
+        <button
+          v-for="(commandSequence, index) in handCommandSequences"
+          :key="`sequence-row-${commandSequence.id}`"
+          type="button"
+          class="grid w-full grid-cols-[minmax(92px,0.9fr)_minmax(0,2fr)] items-center gap-2 border-b border-slate-100 px-3 py-2 text-left transition-colors last:border-b-0 focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-blue-500 dark:border-slate-900"
+          :class="index === selectedSequenceIndex
+            ? 'bg-blue-50 dark:bg-blue-950/40'
+            : 'hover:bg-slate-50 dark:hover:bg-slate-900'"
+          @click="selectCommandSequence(index)">
+          <span
+            class="min-w-0 truncate text-sm font-semibold"
+            :class="index === selectedSequenceIndex
+              ? 'text-blue-700 dark:text-blue-300'
+              : 'text-slate-950 dark:text-slate-50'">
+            {{ commandSequence.label }}
+          </span>
+          <span class="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span
+              v-for="(gesture, gestureIndex) in getCommandSequenceSteps(commandSequence)"
+              :key="`${commandSequence.id}-${gesture}-${gestureIndex}`"
+              class="inline-flex h-7 max-w-full items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+              {{ getGestureLabel(gesture) }}
+            </span>
+          </span>
+        </button>
+      </section>
+
+      <section
+        class="border-x border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
+        aria-label="완료 기록">
+        <div
+          class="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
+          <h2 class="m-0 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+            완료 기록
+          </h2>
+          <span class="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            최근 {{ completionHistory.length }}개
+          </span>
+        </div>
+        <div
+          v-if="completionHistory.length === 0"
+          class="px-3 py-4 text-sm font-semibold text-slate-500 dark:text-slate-400">
+          아직 완료된 시퀀스가 없습니다.
+        </div>
+        <ol v-else class="m-0 list-none divide-y divide-slate-100 p-0 dark:divide-slate-900">
+          <li
+            v-for="entry in completionHistory"
+            :key="entry.id"
+            class="grid grid-cols-[minmax(82px,auto)_minmax(0,1fr)] gap-3 px-3 py-2">
+            <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              {{ formatCompletionTime(entry.completedAt) }}
+            </div>
+            <div class="min-w-0">
+              <div class="truncate text-sm font-bold text-slate-950 dark:text-slate-50">
+                {{ entry.sequenceLabel }}
+              </div>
+              <div class="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+                <span
+                  v-for="(gesture, gestureIndex) in entry.gestures"
+                  :key="`${entry.id}-${gesture}-${gestureIndex}`"
+                  class="inline-flex h-6 max-w-full items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+                  {{ getGestureLabel(gesture) }}
+                </span>
+              </div>
+            </div>
+          </li>
+        </ol>
+      </section>
     </div>
 
     <div class="flex min-h-11 flex-wrap items-center justify-center gap-3">
       <button v-if="!isCameraActive" type="button"
         class="h-10 min-w-22 cursor-pointer rounded-md border border-slate-200 bg-white text-[15px] font-semibold leading-none text-slate-950 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50"
         @click="startCamera">
-        Start
+        시작
       </button>
       <button v-else type="button"
         class="h-10 min-w-22 cursor-pointer rounded-md border border-slate-200 bg-white text-[15px] font-semibold leading-none text-slate-950 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50"
         @click="stopCamera">
-        Stop
+        정지
       </button>
       <p v-if="errorMessage" class="max-w-[min(100%,640px)] text-sm text-orange-700">
         {{ errorMessage }}

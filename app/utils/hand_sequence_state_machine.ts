@@ -12,6 +12,16 @@ export type HandGestureName =
   | 'gesture_fist'
   | 'gesture_pinch'
   | 'gesture_thumb_only'
+  | 'gesture_thumb_up'
+  | 'gesture_thumb_down'
+  | 'gesture_thumb_left'
+  | 'gesture_thumb_right'
+  | 'gesture_index_point'
+  | 'gesture_middle_point'
+  | 'gesture_pinky_point'
+  | 'gesture_peace'
+  | 'gesture_rock'
+  | 'gesture_three'
   | 'no_gesture'
   | (string & {})
 
@@ -66,7 +76,7 @@ const RECOGNIZED_HAND: Handedness = 'Right'
 const START_GESTURE: HandGestureName = 'gesture_fist'
 const END_GESTURE: HandGestureName = 'gesture_open'
 const DEFAULT_SEQUENCE: HandGestureName[] = [START_GESTURE, END_GESTURE]
-const DEFAULT_MIN_HOLD_MS = 250
+const DEFAULT_MIN_HOLD_MS = 100
 const DEFAULT_MAX_GAP_MS = 1200
 const DEFAULT_NO_GESTURE_GRACE_MS = 750
 
@@ -246,12 +256,18 @@ export function advanceHandSequence(
     }
   }
 
-  if (gesture === START_GESTURE) {
+  const timedOut =
+    context.lastAcceptedAt > 0 && at - context.lastAcceptedAt > context.maxGapMs
+  const canStartSequence =
+    gesture === START_GESTURE &&
+    (context.stepIndex === 0 ||
+      context.stepIndex >= context.sequence.length ||
+      timedOut)
+
+  if (canStartSequence) {
     return acceptStartGesture(context, hand, at)
   }
 
-  const timedOut =
-    context.lastAcceptedAt > 0 && at - context.lastAcceptedAt > context.maxGapMs
   const baseContext = timedOut ? resetSequenceProgress(context) : context
 
   if (!baseContext.sequence.length) {
@@ -299,8 +315,25 @@ export function advanceHandSequence(
     return baseContext
   }
 
-  if (gesture === baseContext.sequence[0]) {
+  if (
+    gesture === baseContext.sequence[0] &&
+    (baseContext.stepIndex === 0 ||
+      baseContext.stepIndex >= baseContext.sequence.length)
+  ) {
     return acceptSequenceStep(resetSequenceProgress(baseContext), gesture, hand, at)
+  }
+
+  if (isBriefTransitionGesture(baseContext, hand, at)) {
+    return {
+      ...baseContext,
+      candidateGesture: gesture,
+      candidateHand: hand,
+      candidateSince:
+        gesture === baseContext.candidateGesture &&
+        hand === baseContext.candidateHand
+          ? baseContext.candidateSince
+          : at,
+    }
   }
 
   return {
@@ -346,6 +379,24 @@ function acceptSequenceStep(
     candidateHand: hand,
     candidateSince: at,
   }
+}
+
+function isBriefTransitionGesture(
+  context: HandSequenceContext,
+  hand: Handedness,
+  at: number,
+) {
+  const hasStartedSequence = context.stepIndex > 0 && context.lastAcceptedAt > 0
+  const sameActiveHand =
+    !context.requireSameHand ||
+    context.activeHand === null ||
+    context.activeHand === hand
+
+  return (
+    hasStartedSequence &&
+    sameActiveHand &&
+    at - context.lastAcceptedAt <= context.noGestureGraceMs
+  )
 }
 
 function handleNoGestureFrame(

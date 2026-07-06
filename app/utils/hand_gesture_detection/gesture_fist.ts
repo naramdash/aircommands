@@ -2,17 +2,25 @@ import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import { distance } from './geometry'
 
 export function isFistGesture(landmarks: NormalizedLandmark[]) {
-  const foldedFingers = [
-    isFingerFoldedForFist(landmarks, 8, 6, 5),
-    isFingerFoldedForFist(landmarks, 12, 10, 9),
-    isFingerFoldedForFist(landmarks, 16, 14, 13),
-    isFingerFoldedForFist(landmarks, 20, 18, 17),
+  const fingerStates = [
+    getFingerFoldStateForFist(landmarks, 8, 6, 5),
+    getFingerFoldStateForFist(landmarks, 12, 10, 9),
+    getFingerFoldStateForFist(landmarks, 16, 14, 13),
+    getFingerFoldStateForFist(landmarks, 20, 18, 17),
   ]
+  const foldedFingerCount = fingerStates.filter((state) => state.folded).length
+  const extendedFingerCount = fingerStates.filter(
+    (state) => state.extended,
+  ).length
 
-  return foldedFingers.every(Boolean) && isThumbFoldedForFist(landmarks)
+  return (
+    foldedFingerCount >= 3 &&
+    extendedFingerCount === 0 &&
+    isThumbFoldedForFist(landmarks)
+  )
 }
 
-function isFingerFoldedForFist(
+function getFingerFoldStateForFist(
   landmarks: NormalizedLandmark[],
   tipIndex: number,
   pipIndex: number,
@@ -37,7 +45,7 @@ function isFingerFoldedForFist(
     !ringMcp ||
     !pinkyMcp
   ) {
-    return false
+    return { folded: false, extended: false }
   }
 
   const palmSize = distance(wrist, indexMcp)
@@ -46,12 +54,19 @@ function isFingerFoldedForFist(
     y: (wrist.y + indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 5,
     z: (wrist.z + indexMcp.z + middleMcp.z + ringMcp.z + pinkyMcp.z) / 5,
   }
+  const tipToWrist = distance(tip, wrist)
+  const pipToWrist = distance(pip, wrist)
+  const mcpToWrist = distance(mcp, wrist)
+  const tipToPalmCenter = distance(tip, palmCenter)
 
-  return (
-    tip.y > pip.y - palmSize * 0.015 &&
-    distance(tip, wrist) < distance(mcp, wrist) + palmSize * 0.55 &&
-    distance(tip, palmCenter) < palmSize * 1.2
-  )
+  return {
+    folded:
+      tipToWrist < mcpToWrist + palmSize * 0.62 &&
+      tipToPalmCenter < palmSize * 1.28,
+    extended:
+      tipToWrist > pipToWrist + palmSize * 0.13 &&
+      tipToPalmCenter > palmSize * 1.05,
+  }
 }
 
 function isThumbFoldedForFist(landmarks: NormalizedLandmark[]) {
@@ -81,10 +96,20 @@ function isThumbFoldedForFist(landmarks: NormalizedLandmark[]) {
     y: (wrist.y + indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 5,
     z: (wrist.z + indexMcp.z + middleMcp.z + ringMcp.z + pinkyMcp.z) / 5,
   }
+  const thumbTipToPalmCenter = distance(thumbTip, palmCenter)
+  const thumbTipToIndexMcp = distance(thumbTip, indexMcp)
+  const thumbTipToMiddleMcp = distance(thumbTip, middleMcp)
+  const thumbTipToWrist = distance(thumbTip, wrist)
+  const thumbIpToWrist = distance(thumbIp, wrist)
+  const thumbTipToIp = distance(thumbTip, thumbIp)
+  const thumbIsClearlyExtended =
+    thumbTipToIp > palmSize * 0.42 && thumbTipToIndexMcp > palmSize * 0.72
 
   return (
-    distance(thumbTip, indexMcp) < palmSize * 0.82 &&
-    distance(thumbTip, palmCenter) < palmSize * 0.72 &&
-    distance(thumbTip, wrist) < distance(thumbIp, wrist) + palmSize * 0.1
+    !thumbIsClearlyExtended &&
+    (thumbTipToIndexMcp < palmSize * 0.92 ||
+      thumbTipToMiddleMcp < palmSize * 0.9 ||
+      thumbTipToPalmCenter < palmSize * 0.86) &&
+    thumbTipToWrist < thumbIpToWrist + palmSize * 0.24
   )
 }

@@ -1,7 +1,10 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import { distance } from './geometry'
+import { isHandPointingUp } from './orientation'
 
 export function isThumbOnlyGesture(landmarks: NormalizedLandmark[]) {
+  if (!isHandPointingUp(landmarks)) return false
+
   const foldedFingers = [
     isFingerFoldedForThumbOnly(landmarks, 8, 6),
     isFingerFoldedForThumbOnly(landmarks, 12, 10),
