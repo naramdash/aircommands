@@ -43,6 +43,8 @@ type OpenAppResponse =
 const FINGER_RADIUS = 5
 const ACTIVE_FINGER_RADIUS = 8
 const TOUCH_COLOR = '250, 204, 21'
+const TOUCH_SUCCESS_COLOR = '34, 197, 94'
+const TOUCH_SUCCESS_HIGHLIGHT_MS = 900
 const FINGER_COLORS: Record<FingerName, string> = {
   thumb: '239, 68, 68',
   index: '34, 197, 94',
@@ -120,6 +122,25 @@ const touchGestureRows = computed(() => {
 const cooldownSeconds = computed(() =>
   Math.ceil(cooldownRemainingMs.value / 1000),
 )
+const statusColor = computed(() => {
+  if (poseWarning.value) return 'warning'
+  if (recognitionState.value === 'error') return 'error'
+  if (recognitionState.value === 'touching') return 'success'
+  if (
+    recognitionState.value === 'executing' ||
+    recognitionState.value === 'cooldown'
+  ) {
+    return 'info'
+  }
+  if (
+    !isCameraActive.value ||
+    (!isLeftHandVisible.value && !isRightHandVisible.value)
+  ) {
+    return 'neutral'
+  }
+
+  return 'primary'
+})
 const trackingStatus = computed(() => {
   if (!isCameraActive.value) return '카메라 대기'
   if (!isLeftHandVisible.value && !isRightHandVisible.value) return '손 대기'
@@ -163,6 +184,8 @@ let animationFrameId = 0
 let recognitionContext = createRecognitionContext()
 let isExecutingRequest = false
 let gestureCompletionTimer: ReturnType<typeof setTimeout> | null = null
+let successfulTouchContact: TouchContact | null = null
+let successfulTouchUntil = 0
 
 async function startCamera() {
   errorMessage.value = ''
@@ -243,16 +266,29 @@ function drawCameraFrame() {
 
     const activeContact =
       recognitionResult.context.activeTouch ?? touchFrame.closestContact
+    const successContact = getSuccessTouchContact(
+      recognitionResult.executionCandidate ? activeContact : null,
+      now,
+    )
+    const displayedContact = successContact ?? activeContact
 
     context.clearRect(0, 0, canvas.width, canvas.height)
     drawTouchContact(
       context,
       canvas.width,
       canvas.height,
-      activeContact,
-      recognitionResult.context.touchProgress,
+      displayedContact,
+      successContact ? 1 : recognitionResult.context.touchProgress,
+      Boolean(successContact),
     )
-    drawFingerTips(context, canvas.width, canvas.height, touchFrame, activeContact)
+    drawFingerTips(
+      context,
+      canvas.width,
+      canvas.height,
+      touchFrame,
+      activeContact,
+      successContact,
+    )
 
     recognitionContext = recognitionResult.context
     syncRecognitionDisplay(touchFrame, now)
@@ -275,21 +311,54 @@ function syncCanvasSize(canvas: HTMLCanvasElement, video: HTMLVideoElement) {
   canvas.height = video.videoHeight
 }
 
+function getSuccessTouchContact(contact: TouchContact | null, now: number) {
+  if (contact) {
+    successfulTouchContact = contact
+    successfulTouchUntil = now + TOUCH_SUCCESS_HIGHLIGHT_MS
+    return contact
+  }
+
+  if (successfulTouchContact && successfulTouchUntil > now) {
+    return successfulTouchContact
+  }
+
+  successfulTouchContact = null
+  successfulTouchUntil = 0
+  return null
+}
+
 function drawFingerTips(
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
   frame: TwoHandTouchFrame,
   activeContact: TouchContact | null,
+  successContact: TouchContact | null,
 ) {
   context.save()
 
   for (const tip of frame.leftTips) {
-    drawFingerTip(context, tip, 'left', width, height, activeContact)
+    drawFingerTip(
+      context,
+      tip,
+      'left',
+      width,
+      height,
+      activeContact,
+      successContact,
+    )
   }
 
   for (const tip of frame.rightTips) {
-    drawFingerTip(context, tip, 'right', width, height, activeContact)
+    drawFingerTip(
+      context,
+      tip,
+      'right',
+      width,
+      height,
+      activeContact,
+      successContact,
+    )
   }
 
   context.restore()
@@ -302,6 +371,7 @@ function drawFingerTip(
   width: number,
   height: number,
   activeContact: TouchContact | null,
+  successContact: TouchContact | null,
 ) {
   const x = tip.point.x * width
   const y = tip.point.y * height
@@ -313,17 +383,27 @@ function drawFingerTip(
       : activeContact?.hand === (hand === 'left' ? 'Left' : 'Right') &&
         (activeContact.primaryFinger === tip.finger ||
           activeContact.secondaryFinger === tip.finger)
-  const radius = isActive ? ACTIVE_FINGER_RADIUS : FINGER_RADIUS
+  const isSuccess =
+    successContact?.contactType === 'two_hand'
+      ? hand === 'left'
+        ? successContact.leftFinger === tip.finger
+        : successContact.rightFinger === tip.finger
+      : successContact?.hand === (hand === 'left' ? 'Left' : 'Right') &&
+        (successContact.primaryFinger === tip.finger ||
+          successContact.secondaryFinger === tip.finger)
+  const radius = isActive || isSuccess ? ACTIVE_FINGER_RADIUS : FINGER_RADIUS
   const color = FINGER_COLORS[tip.finger]
 
-  if (isActive) {
+  if (isActive || isSuccess) {
+    const highlightColor = isSuccess ? TOUCH_SUCCESS_COLOR : TOUCH_COLOR
+
     context.save()
-    context.shadowColor = `rgba(${TOUCH_COLOR}, 0.55)`
-    context.shadowBlur = 10
-    context.strokeStyle = `rgba(${TOUCH_COLOR}, 1)`
-    context.lineWidth = 4
+    context.shadowColor = `rgba(${highlightColor}, 0.6)`
+    context.shadowBlur = isSuccess ? 14 : 10
+    context.strokeStyle = `rgba(${highlightColor}, 1)`
+    context.lineWidth = isSuccess ? 5 : 4
     context.beginPath()
-    context.arc(x, y, radius + 7, 0, Math.PI * 2)
+    context.arc(x, y, radius + (isSuccess ? 9 : 7), 0, Math.PI * 2)
     context.stroke()
     context.restore()
   }
@@ -381,6 +461,7 @@ function drawTouchContact(
   height: number,
   contact: TouchContact | null,
   progress: number,
+  isSuccess: boolean,
 ) {
   if (!contact) return
 
@@ -391,25 +472,26 @@ function drawTouchContact(
   const centerX = contact.midpoint.x * width
   const centerY = contact.midpoint.y * height
   const ringRadius = 17
+  const touchColor = isSuccess ? TOUCH_SUCCESS_COLOR : TOUCH_COLOR
 
   context.save()
   context.lineCap = 'round'
-  context.shadowColor = `rgba(${TOUCH_COLOR}, 0.45)`
-  context.shadowBlur = 8
-  context.strokeStyle = `rgba(${TOUCH_COLOR}, 0.96)`
-  context.lineWidth = 4
+  context.shadowColor = `rgba(${touchColor}, ${isSuccess ? 0.6 : 0.45})`
+  context.shadowBlur = isSuccess ? 12 : 8
+  context.strokeStyle = `rgba(${touchColor}, 0.96)`
+  context.lineWidth = isSuccess ? 5 : 4
   context.beginPath()
   context.moveTo(leftX, leftY)
   context.lineTo(rightX, rightY)
   context.stroke()
 
-  context.strokeStyle = `rgba(${TOUCH_COLOR}, 0.28)`
+  context.strokeStyle = `rgba(${touchColor}, ${isSuccess ? 0.4 : 0.28})`
   context.lineWidth = 3
   context.beginPath()
   context.arc(centerX, centerY, ringRadius, 0, Math.PI * 2)
   context.stroke()
 
-  context.strokeStyle = `rgba(${TOUCH_COLOR}, 1)`
+  context.strokeStyle = `rgba(${touchColor}, 1)`
   context.beginPath()
   context.arc(
     centerX,
@@ -424,6 +506,8 @@ function drawTouchContact(
 
 function resetRecognition() {
   recognitionContext = createRecognitionContext()
+  successfulTouchContact = null
+  successfulTouchUntil = 0
   isLeftHandVisible.value = false
   isRightHandVisible.value = false
   recognitionState.value = recognitionContext.state
@@ -579,380 +663,344 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main
-    class="grid min-h-svh grid-rows-[minmax(0,1fr)_auto] gap-4 box-border bg-slate-950 p-3 text-slate-50 md:p-6">
-    <Transition
-      enter-active-class="transition duration-150 ease-out"
-      enter-from-class="-translate-y-2 opacity-0"
-      enter-to-class="translate-y-0 opacity-100"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="translate-y-0 opacity-100"
-      leave-to-class="-translate-y-2 opacity-0">
-      <div
-        v-if="gestureCompletionNotice"
-        class="fixed left-1/2 top-4 z-50 w-[min(calc(100vw_-_24px),420px)] -translate-x-1/2 rounded-md border border-emerald-300 bg-slate-950/95 px-4 py-3 text-center shadow-xl shadow-emerald-950/40 backdrop-blur"
-        role="status"
-        aria-live="polite">
-        <div class="text-[11px] font-bold uppercase text-emerald-300">
-          접촉 명령 완료
-        </div>
-        <div class="mt-1 truncate text-sm font-black text-slate-50">
-          {{ gestureCompletionNotice }}
-        </div>
-      </div>
-    </Transition>
+  <UApp>
+    <main
+      class="box-border grid min-h-svh grid-rows-[minmax(0,1fr)_auto] gap-3 bg-muted p-2 text-default md:p-3">
+      <Transition
+        enter-active-class="transition duration-150 ease-out"
+        enter-from-class="-translate-y-2 opacity-0"
+        enter-to-class="translate-y-0 opacity-100"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="translate-y-0 opacity-100"
+        leave-to-class="-translate-y-2 opacity-0">
+        <UAlert
+          v-if="gestureCompletionNotice"
+          color="success"
+          variant="subtle"
+          icon="i-lucide-check-circle"
+          title="접촉 명령 완료"
+          :description="gestureCompletionNotice"
+          class="fixed left-1/2 top-4 z-50 w-[min(calc(100vw_-_24px),420px)] -translate-x-1/2 shadow-xl backdrop-blur"
+          role="status"
+          aria-live="polite"
+          :ui="{ title: 'font-black', description: 'truncate font-bold' }" />
+      </Transition>
 
-    <div class="w-full max-w-[1120px] self-center justify-self-center">
-      <div
-        class="relative aspect-video w-full overflow-hidden rounded-t-lg border border-slate-800 bg-neutral-950 max-md:rounded-t-md">
-        <video
-          ref="videoRef"
-          muted
-          playsinline
-          class="block size-full scale-x-[-1] object-cover" />
-        <canvas
-          ref="canvasRef"
-          class="pointer-events-none absolute inset-0 block size-full scale-x-[-1]" />
-        <section
-          class="pointer-events-none absolute bottom-3 left-3 right-3 rounded-md border px-3 py-2 shadow-lg backdrop-blur-sm transition-colors"
-          :class="isRecognitionOnHold
-            ? 'border-amber-300/75 bg-amber-950/82 shadow-amber-950/40'
-            : 'border-slate-700/70 bg-slate-950/82'"
-          aria-label="인식 단계">
-          <div class="flex flex-wrap items-center gap-2">
-            <span
-              class="rounded px-2 py-1 text-xs font-black transition-colors"
-              :class="isRecognitionOnHold
-                ? 'bg-amber-300 text-amber-950'
-                : 'bg-emerald-400 text-slate-950'">
-              {{ trackingStatus }}
-            </span>
-            <span
-              class="min-w-0 truncate text-xs font-semibold transition-colors"
-              :class="isRecognitionOnHold ? 'text-amber-100' : 'text-slate-100'">
-              {{ phaseGuideText }}
-            </span>
-          </div>
-        </section>
-      </div>
+      <UContainer class="w-full self-center justify-self-center px-0 sm:px-0 lg:px-0">
+        <UCard
+          variant="subtle"
+          class="overflow-hidden"
+          :ui="{ body: 'p-0 sm:p-0' }">
+          <div class="relative aspect-video w-full overflow-hidden bg-inverted">
+            <video
+              ref="videoRef"
+              muted
+              playsinline
+              class="block size-full scale-x-[-1] object-cover" />
+            <canvas
+              ref="canvasRef"
+              class="pointer-events-none absolute inset-0 block size-full scale-x-[-1]" />
 
-      <dl
-        class="m-0 grid grid-cols-2 overflow-hidden border-x border-b transition-colors md:grid-cols-6"
-        :class="isRecognitionOnHold
-          ? 'border-amber-900/80 bg-amber-950/35'
-          : 'border-slate-800 bg-slate-900'"
-        aria-label="양손 손가락 접촉 명령 인식 상태">
-        <div class="min-w-0 px-3 py-2.5">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
-            상태
-          </dt>
-          <dd
-            class="m-0 truncate text-sm font-semibold leading-tight"
-            :class="isRecognitionOnHold ? 'text-amber-200' : 'text-slate-50'">
-            {{ trackingStatus }}
-          </dd>
-        </div>
-        <div class="min-w-0 px-3 py-2.5">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
-            접촉
-          </dt>
-          <dd class="m-0 truncate text-sm font-semibold leading-tight">
-            {{ currentTouchLabel }}
-          </dd>
-        </div>
-        <div class="min-w-0 px-3 py-2.5">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
-            후보
-          </dt>
-          <dd class="m-0 truncate text-sm font-semibold leading-tight">
-            {{ currentCandidateLabel }}
-          </dd>
-        </div>
-        <div class="min-w-0 px-3 py-2.5">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
-            유지
-          </dt>
-          <dd class="m-0 truncate text-sm font-semibold leading-tight">
-            {{ touchProgressPercent }}%
-          </dd>
-        </div>
-        <div class="min-w-0 px-3 py-2.5">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
-            거리
-          </dt>
-          <dd class="m-0 truncate text-sm font-semibold leading-tight">
-            {{ touchDistanceText }}
-          </dd>
-        </div>
-        <div class="min-w-0 px-3 py-2.5">
-          <dt class="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
-            쿨다운
-          </dt>
-          <dd class="m-0 truncate text-sm font-semibold leading-tight">
-            {{ cooldownSeconds > 0 ? `${cooldownSeconds}초` : '없음' }}
-          </dd>
-        </div>
-      </dl>
-
-      <div
-        class="rounded-b-lg border-x border-b border-slate-800 bg-slate-950 px-3 py-3">
-        <div class="mb-3 grid gap-3 lg:grid-cols-[1fr_280px]">
-          <div class="min-w-0">
-            <div class="text-[11px] font-bold uppercase text-slate-500">
-              손가락 접촉 명령표
-            </div>
-            <div class="mt-1 text-xs font-semibold text-slate-300">
-              칸에는 손가락 조합과 실행 앱만 표시합니다. 자세한 후보는 오른쪽 패널에서 확인하세요.
-            </div>
-            <div class="mt-3 flex flex-wrap gap-1.5">
-              <span
-                v-for="finger in fingerDefinitions"
-                :key="finger.name"
-                class="inline-flex h-6 items-center gap-1.5 rounded border border-slate-800 bg-slate-900 px-2 text-[11px] font-bold text-slate-200">
-                <span
-                  class="size-2.5 rounded-full"
-                  :style="{ backgroundColor: getFingerColor(finger.name) }" />
-                {{ finger.label }}
-              </span>
-            </div>
-          </div>
-          <div
-            class="rounded-md border px-3 py-2"
-            :class="activeTouchCommand
-              ? 'border-yellow-300/60 bg-yellow-300/12'
-              : 'border-slate-800 bg-slate-900'">
-            <div class="text-[11px] font-bold uppercase text-slate-500">
-              현재 후보
-            </div>
-            <div
-              class="mt-1 truncate text-sm font-black"
-              :class="activeTouchCommand ? 'text-yellow-100' : 'text-slate-400'">
-              {{ activeTouchCommand?.gestureLabel ?? '없음' }}
-            </div>
-            <div
-              class="mt-1 truncate text-xs font-semibold"
-              :class="activeTouchCommand ? 'text-yellow-200' : 'text-slate-500'">
-              {{ activeTouchCommand?.label ?? '손가락 접촉 대기' }}
-            </div>
-          </div>
-        </div>
-
-        <div aria-label="양손 접촉 명령 25개">
-          <div
-            class="grid grid-cols-[56px_repeat(5,minmax(0,1fr))] gap-1 text-xs font-semibold">
-            <div
-              class="grid h-12 place-items-center rounded border border-slate-800 bg-slate-900 text-[10px] font-black text-slate-500">
-              L/R
-            </div>
-            <div
-              v-for="rightFinger in fingerDefinitions"
-              :key="rightFinger.name"
-              class="grid h-12 place-items-center rounded border border-emerald-400/30 bg-emerald-400/10 px-1 text-center">
-              <svg class="size-4" viewBox="0 0 16 16" aria-hidden="true">
-                <path
-                  d="M8 1.5 15 14.5H1z"
-                  :fill="getFingerColor(rightFinger.name)" />
-              </svg>
-              <div class="text-[11px] font-black leading-none text-slate-50">
-                {{ rightFinger.label }}
+            <section
+              class="pointer-events-none absolute top-3 inset-x-3 z-10 grid w-auto max-w-[calc(100%-1.5rem)] grid-cols-2 overflow-hidden rounded-lg border border-default bg-default/70 shadow-lg backdrop-blur-md sm:grid-cols-3 lg:grid-cols-6"
+              aria-label="양손 손가락 접촉 명령 인식 상태">
+              <div class="min-w-0 border-b border-default px-2 py-1.5 sm:border-r lg:border-b-0">
+                <div class="mb-0.5 text-[10px] font-bold uppercase text-muted">
+                  상태
+                </div>
+                <UBadge
+                  :color="statusColor"
+                  variant="subtle"
+                  size="sm"
+                  :label="trackingStatus"
+                  class="max-w-full" />
               </div>
-            </div>
-            <template
-              v-for="row in touchGestureRows"
-              :key="row.leftFinger.name">
-              <div
-                class="grid h-14 place-items-center rounded border border-sky-400/30 bg-sky-400/10 px-1 text-center">
-                <span
-                  class="size-3.5 rounded-sm"
-                  :style="{ backgroundColor: getFingerColor(row.leftFinger.name) }" />
-                <div class="text-[11px] font-black leading-none text-slate-50">
-                  {{ row.leftFinger.label }}
+              <div class="min-w-0 border-b border-default px-2 py-1.5 sm:border-r lg:border-b-0">
+                <div class="mb-0.5 text-[10px] font-bold uppercase text-muted">
+                  가까운 접촉
+                </div>
+                <div class="flex min-w-0 items-center gap-1.5">
+                  <span class="min-w-0 truncate text-xs font-semibold text-highlighted">
+                    {{ currentTouchLabel }}
+                  </span>
+                  <UBadge
+                    v-if="activeTouchCommand"
+                    color="warning"
+                    variant="soft"
+                    size="xs"
+                    :label="getAppShortLabel(activeTouchCommand.label)"
+                    class="shrink-0" />
                 </div>
               </div>
-              <div
-                v-for="command in row.commands"
-                :key="command.gesture"
-                class="grid h-14 min-w-0 rounded border px-1.5 py-1 transition"
-                :class="command.gesture === currentTouchGesture
-                  ? 'border-yellow-300 bg-yellow-300/18 shadow-[0_0_0_1px_rgba(250,204,21,0.35)]'
-                  : 'border-slate-800 bg-slate-900 hover:border-slate-700'"
-                :title="`${command.gestureLabel} / ${command.label}`">
-                <div class="flex min-w-0 items-center justify-center gap-1">
-                  <span
-                    class="size-3 rounded-sm"
-                    :style="{ backgroundColor: getFingerColor(command.leftFinger) }" />
-                  <span class="text-[11px] font-black leading-none text-slate-500">
-                    +
+              <div class="min-w-0 border-b border-default px-2 py-1.5 sm:border-r lg:border-b-0">
+                <div class="mb-0.5 text-[10px] font-bold uppercase text-muted">
+                  실행 후보
+                </div>
+                <div class="truncate text-xs font-semibold text-highlighted">
+                  {{ currentCandidateLabel }}
+                </div>
+              </div>
+              <div class="min-w-0 border-b border-default px-2 py-1.5 sm:border-r sm:border-b-0">
+                <div class="mb-0.5 text-[10px] font-bold uppercase text-muted">
+                  유지
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <UProgress
+                    :model-value="touchProgressPercent"
+                    :color="isRecognitionOnHold ? 'warning' : 'primary'"
+                    size="sm"
+                    class="min-w-0 flex-1" />
+                  <span class="shrink-0 text-xs font-semibold text-highlighted">
+                    {{ touchProgressPercent }}%
                   </span>
-                  <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+                </div>
+              </div>
+              <div class="min-w-0 border-r border-default px-2 py-1.5">
+                <div class="mb-0.5 text-[10px] font-bold uppercase text-muted">
+                  거리
+                </div>
+                <div class="truncate text-xs font-semibold text-highlighted">
+                  {{ touchDistanceText }}
+                </div>
+              </div>
+              <div class="min-w-0 px-2 py-1.5">
+                <div class="mb-0.5 text-[10px] font-bold uppercase text-muted">
+                  쿨다운
+                </div>
+                <div class="truncate text-xs font-semibold text-highlighted">
+                  {{ cooldownSeconds > 0 ? `${cooldownSeconds}초` : '없음' }}
+                </div>
+              </div>
+            </section>
+
+            <UAlert
+              :color="statusColor"
+              variant="subtle"
+              :icon="
+                isRecognitionOnHold
+                  ? 'i-lucide-triangle-alert'
+                  : 'i-lucide-hand'
+              "
+              class="pointer-events-none absolute bottom-3 inset-x-3 w-auto max-w-[calc(100%-1.5rem)] shadow-lg backdrop-blur-sm"
+              :title="trackingStatus"
+              :description="phaseGuideText"
+              aria-label="인식 단계"
+              :ui="{
+                root: 'items-center gap-2 overflow-hidden px-3 py-2.5',
+                wrapper: 'min-w-0 overflow-hidden',
+                title: 'truncate text-xs font-black',
+                description: 'truncate text-xs font-semibold',
+                icon: 'shrink-0',
+              }" />
+          </div>
+
+          <section class="space-y-3 p-2">
+            <section aria-label="양손 접촉 명령 25개">
+              <div
+                class="grid grid-cols-[56px_repeat(5,minmax(0,1fr))] gap-1 text-xs font-semibold">
+                <div
+                  class="grid h-12 place-items-center rounded-md bg-elevated text-[10px] font-black text-muted ring ring-default">
+                  L/R
+                </div>
+                <div
+                  v-for="rightFinger in fingerDefinitions"
+                  :key="rightFinger.name"
+                  class="grid h-12 place-items-center rounded-md bg-primary/10 px-1 text-center ring ring-primary/25">
+                  <svg class="size-4" viewBox="0 0 16 16" aria-hidden="true">
                     <path
                       d="M8 1.5 15 14.5H1z"
-                      :fill="getFingerColor(command.rightFinger)" />
+                      :fill="getFingerColor(rightFinger.name)" />
                   </svg>
-                  <span
-                    class="ml-0.5 truncate text-[11px] font-black leading-none"
-                    :class="command.gesture === currentTouchGesture
-                      ? 'text-yellow-100'
-                      : 'text-slate-100'">
-                    {{ command.mark }}
-                  </span>
-                </div>
-                <div
-                  class="mt-1 truncate text-center text-[10px] font-bold leading-none"
-                  :class="command.gesture === currentTouchGesture
-                    ? 'text-yellow-200'
-                    : 'text-slate-400'">
-                  {{ getAppShortLabel(command.label) }}
-                </div>
-              </div>
-            </template>
-          </div>
-        </div>
-        <div class="mt-2 text-[11px] font-medium text-slate-500">
-          네모는 왼손, 세모는 오른손입니다. 노란 칸은 현재 가장 가까운 접촉 후보입니다.
-        </div>
-
-        <div class="mt-4 border-t border-slate-800 pt-3">
-          <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <div class="text-[11px] font-bold uppercase text-slate-500">
-              한 손 엄지 접촉
-            </div>
-            <span
-              class="rounded border border-fuchsia-400/40 bg-fuchsia-400/12 px-2 py-1 text-[11px] font-semibold text-fuchsia-100">
-              왼손/오른손 별도
-            </span>
-          </div>
-          <div class="grid gap-3 lg:grid-cols-2">
-            <div
-              v-for="group in oneHandGestureGroups"
-              :key="group.hand"
-              class="rounded-md border px-2.5 py-2.5"
-              :class="group.hand === 'Left'
-                ? 'border-sky-400/35 bg-sky-400/8'
-                : 'border-emerald-400/35 bg-emerald-400/8'">
-              <div class="mb-2 flex items-center justify-between gap-2">
-                <div class="flex min-w-0 items-center gap-2">
-                  <span
-                    v-if="group.hand === 'Left'"
-                    class="size-4 rounded-sm bg-sky-300 shadow-[0_0_0_2px_rgba(125,211,252,0.18)]" />
-                  <svg
-                    v-else
-                    class="size-5 shrink-0 drop-shadow"
-                    viewBox="0 0 16 16"
-                    aria-hidden="true">
-                    <path d="M8 1.5 15 14.5H1z" fill="rgb(110, 231, 183)" />
-                  </svg>
-                  <div class="min-w-0">
-                    <div class="truncate text-sm font-black text-slate-50">
-                      {{ group.label }} 한손 접촉
-                    </div>
-                    <div class="text-[10px] font-bold text-slate-400">
-                      {{ group.shapeLabel }} 표시
-                    </div>
+                  <div class="text-[11px] font-black leading-none text-highlighted">
+                    {{ rightFinger.label }}
                   </div>
                 </div>
-                <span
-                  class="rounded px-2 py-1 text-[10px] font-black"
-                  :class="group.hand === 'Left'
-                    ? 'bg-sky-300/15 text-sky-100'
-                    : 'bg-emerald-300/15 text-emerald-100'">
-                  {{ group.label }}
-                </span>
-              </div>
 
-              <div class="grid gap-1.5">
-                <div
-                  v-for="command in group.commands"
-                  :key="command.gesture"
-                  class="rounded border px-2 py-2 transition"
-                  :class="command.gesture === currentTouchGesture
-                    ? 'border-yellow-300 bg-yellow-300/18 shadow-[0_0_0_1px_rgba(250,204,21,0.35)]'
-                    : 'border-slate-800 bg-slate-900/88'"
-                  :title="`${command.gestureLabel} / ${command.label}`">
-                  <div class="flex min-w-0 items-center justify-between gap-2">
-                    <div class="flex min-w-0 items-center gap-1.5">
-                      <template v-if="group.hand === 'Left'">
-                        <span
-                          class="size-3 rounded-sm"
-                          :style="{ backgroundColor: getFingerColor(command.primaryFinger) }" />
-                        <span class="text-[11px] font-black text-slate-500">
-                          +
-                        </span>
-                        <span
-                          class="size-3 rounded-sm"
-                          :style="{ backgroundColor: getFingerColor(command.secondaryFinger) }" />
-                      </template>
-                      <template v-else>
-                        <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
-                          <path
-                            d="M8 1.5 15 14.5H1z"
-                            :fill="getFingerColor(command.primaryFinger)" />
-                        </svg>
-                        <span class="text-[11px] font-black text-slate-500">
-                          +
-                        </span>
-                        <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
-                          <path
-                            d="M8 1.5 15 14.5H1z"
-                            :fill="getFingerColor(command.secondaryFinger)" />
-                        </svg>
-                      </template>
+                <template
+                  v-for="row in touchGestureRows"
+                  :key="row.leftFinger.name">
+                  <div
+                    class="grid h-14 place-items-center rounded-md bg-secondary/10 px-1 text-center ring ring-secondary/25">
+                    <span
+                      class="size-3.5 rounded-sm"
+                      :style="{ backgroundColor: getFingerColor(row.leftFinger.name) }" />
+                    <div class="text-[11px] font-black leading-none text-highlighted">
+                      {{ row.leftFinger.label }}
+                    </div>
+                  </div>
+                  <div
+                    v-for="command in row.commands"
+                    :key="command.gesture"
+                    class="grid h-14 min-w-0 rounded-md px-1.5 py-1 transition"
+                    :class="command.gesture === currentTouchGesture
+                      ? 'bg-warning/10 text-warning ring-2 ring-warning/60'
+                      : 'bg-elevated/70 text-default ring ring-default hover:bg-accented'"
+                    :title="`${command.gestureLabel} / ${command.label}`">
+                    <div class="flex min-w-0 items-center justify-center gap-1">
                       <span
-                        class="truncate text-xs font-black"
-                        :class="command.gesture === currentTouchGesture
-                          ? 'text-yellow-100'
-                          : 'text-slate-50'">
-                        {{ command.gestureLabel }}
+                        class="size-3 rounded-sm"
+                        :style="{ backgroundColor: getFingerColor(command.leftFinger) }" />
+                      <span class="text-[11px] font-black leading-none text-muted">
+                        +
+                      </span>
+                      <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+                        <path
+                          d="M8 1.5 15 14.5H1z"
+                          :fill="getFingerColor(command.rightFinger)" />
+                      </svg>
+                      <span class="ml-0.5 truncate text-[11px] font-black leading-none">
+                        {{ command.mark }}
                       </span>
                     </div>
-                    <span
-                      class="shrink-0 text-[10px] font-bold"
-                      :class="command.gesture === currentTouchGesture
-                        ? 'text-yellow-200'
-                        : 'text-slate-400'">
+                    <div class="mt-1 truncate text-center text-[10px] font-bold leading-none text-toned">
                       {{ getAppShortLabel(command.label) }}
-                    </span>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </section>
+
+            <section
+              class="grid gap-2 lg:grid-cols-2"
+              aria-label="한 손 엄지 접촉">
+              <UCard
+                v-for="group in oneHandGestureGroups"
+                :key="group.hand"
+                variant="subtle"
+                :ui="{ header: 'px-2.5 py-2 sm:px-2.5', body: 'px-2.5 py-2 sm:px-2.5' }"
+                :class="group.hand === 'Left'
+                  ? 'ring-secondary/35'
+                  : 'ring-primary/35'">
+                <template #header>
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <span
+                        v-if="group.hand === 'Left'"
+                        class="size-4 rounded-sm bg-secondary ring-2 ring-secondary/20" />
+                      <svg
+                        v-else
+                        class="size-5 shrink-0 drop-shadow"
+                        viewBox="0 0 16 16"
+                        aria-hidden="true">
+                        <path d="M8 1.5 15 14.5H1z" fill="var(--ui-primary)" />
+                      </svg>
+                      <div class="min-w-0">
+                        <div class="truncate text-sm font-black text-highlighted">
+                          {{ group.label }} 한손 접촉
+                        </div>
+                        <div class="text-[10px] font-bold text-muted">
+                          {{ group.shapeLabel }} 표시
+                        </div>
+                      </div>
+                    </div>
+                    <UBadge
+                      :color="group.hand === 'Left' ? 'secondary' : 'primary'"
+                      variant="soft"
+                      size="sm"
+                      :label="group.label" />
+                  </div>
+                </template>
+
+                <div class="grid gap-1.5">
+                  <div
+                    v-for="command in group.commands"
+                    :key="command.gesture"
+                    class="rounded-md px-2 py-1.5 transition"
+                    :class="command.gesture === currentTouchGesture
+                      ? 'bg-warning/10 text-warning ring-2 ring-warning/60'
+                      : 'bg-default text-default ring ring-default'"
+                    :title="`${command.gestureLabel} / ${command.label}`">
+                    <div class="flex min-w-0 items-center justify-between gap-2">
+                      <div class="flex min-w-0 items-center gap-1.5">
+                        <template v-if="group.hand === 'Left'">
+                          <span
+                            class="size-3 rounded-sm"
+                            :style="{ backgroundColor: getFingerColor(command.primaryFinger) }" />
+                          <span class="text-[11px] font-black text-muted">
+                            +
+                          </span>
+                          <span
+                            class="size-3 rounded-sm"
+                            :style="{ backgroundColor: getFingerColor(command.secondaryFinger) }" />
+                        </template>
+                        <template v-else>
+                          <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+                            <path
+                              d="M8 1.5 15 14.5H1z"
+                              :fill="getFingerColor(command.primaryFinger)" />
+                          </svg>
+                          <span class="text-[11px] font-black text-muted">
+                            +
+                          </span>
+                          <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+                            <path
+                              d="M8 1.5 15 14.5H1z"
+                              :fill="getFingerColor(command.secondaryFinger)" />
+                          </svg>
+                        </template>
+                        <span class="truncate text-xs font-black">
+                          {{ command.gestureLabel }}
+                        </span>
+                      </div>
+                      <UBadge
+                        color="neutral"
+                        variant="soft"
+                        size="xs"
+                        :label="getAppShortLabel(command.label)"
+                        class="shrink-0" />
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="sr-only">
-          <ul>
-            <li
-              v-for="command in supportedGestureItems"
-              :key="command.gesture">
-              {{ command.gestureLabel }}: {{ command.label }}
-            </li>
-          </ul>
-        </div>
-      </div>
-    </div>
+              </UCard>
+            </section>
 
-    <div class="flex min-h-11 flex-wrap items-center justify-center gap-3">
-      <button
-        v-if="!isCameraActive"
-        type="button"
-        class="h-10 min-w-22 cursor-pointer rounded-md border border-emerald-500 bg-emerald-500 px-4 text-[15px] font-semibold leading-none text-slate-950 hover:bg-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
-        @click="startCamera">
-        시작
-      </button>
-      <button
-        v-else
-        type="button"
-        class="h-10 min-w-22 cursor-pointer rounded-md border border-slate-700 bg-slate-900 px-4 text-[15px] font-semibold leading-none text-slate-50 hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
-        @click="stopCamera">
-        정지
-      </button>
-      <p
-        v-if="commandResultMessage"
-        class="max-w-[min(100%,640px)] text-sm font-semibold text-emerald-300">
-        {{ commandResultMessage }}
-      </p>
-      <p v-if="errorMessage" class="max-w-[min(100%,640px)] text-sm text-orange-300">
-        {{ errorMessage }}
-      </p>
-    </div>
-  </main>
+            <div class="sr-only">
+              <ul>
+                <li
+                  v-for="command in supportedGestureItems"
+                  :key="command.gesture">
+                  {{ command.gestureLabel }}: {{ command.label }}
+                </li>
+              </ul>
+            </div>
+          </section>
+        </UCard>
+      </UContainer>
+
+      <div class="flex min-h-11 flex-wrap items-center justify-center gap-3">
+        <UButton
+          v-if="!isCameraActive"
+          type="button"
+          color="primary"
+          size="lg"
+          icon="i-lucide-video"
+          label="시작"
+          @click="startCamera" />
+        <UButton
+          v-else
+          type="button"
+          color="neutral"
+          variant="outline"
+          size="lg"
+          icon="i-lucide-square"
+          label="정지"
+          @click="stopCamera" />
+
+        <UBadge
+          v-if="commandResultMessage"
+          color="success"
+          variant="subtle"
+          size="lg"
+          :label="commandResultMessage"
+          class="max-w-[min(100%,640px)]" />
+        <UBadge
+          v-if="errorMessage"
+          color="warning"
+          variant="subtle"
+          size="lg"
+          :label="errorMessage"
+          class="max-w-[min(100%,640px)]" />
+      </div>
+    </main>
+  </UApp>
 </template>

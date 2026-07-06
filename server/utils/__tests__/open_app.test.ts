@@ -1,5 +1,4 @@
-import { describe, it, beforeEach } from 'node:test'
-import assert from 'node:assert/strict'
+import { assert, beforeEach, describe, it } from 'vitest'
 import {
   clearOpenAppRequestDedupeForTests,
   openAppRequest,
