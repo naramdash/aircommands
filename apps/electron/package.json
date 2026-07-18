@@ -2,12 +2,16 @@
   "name": "aircommands-electron",
   "version": "0.1.0",
   "main": "dist-electron/main/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/naramdash/aircommands.git"
+  },
   "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build && electron-builder --config electron-builder.config.mjs",
+    "build": "vue-tsc --noEmit && vite build && electron-builder --config electron-builder.config.mjs --publish never",
     "preview": "vite preview"
   },
   "devDependencies": {
