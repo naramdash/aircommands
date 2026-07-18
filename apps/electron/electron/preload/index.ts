@@ -32,6 +32,14 @@ contextBridge.exposeInMainWorld('aircommands', {
   }) {
     return ipcRenderer.invoke('app:open', payload)
   },
+  notifyGesture(payload: {
+    status?: unknown
+    gestureLabel?: unknown
+    appLabel?: unknown
+    message?: unknown
+  }) {
+    return ipcRenderer.invoke('app:notify-gesture', payload)
+  },
   onMainProcessMessage(listener: (message: string) => void) {
     const wrapped = (_event: Electron.IpcRendererEvent, value: string) => {
       listener(value)

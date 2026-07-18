@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, Menu, Notification, Tray, nativeImage } from 'electron'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -40,15 +40,164 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 let win: BrowserWindow | null = null
+let tray: Tray | null = null
+let isQuitting = false
+let gestureNotificationsEnabled = true
+let trayBackgroundNoticeShown = false
 const preload = path.join(__dirname, '../preload/index.mjs')
 const indexHtml = path.join(RENDERER_DIST, 'index.html')
+
+function getTrayIconPath() {
+  return path.join(process.env.VITE_PUBLIC, 'app-icon.png')
+}
+
+function getNotificationIconPath() {
+  return path.join(process.env.VITE_PUBLIC, 'app-icon.png')
+}
+
+function getWindowIconPath() {
+  if (process.platform === 'win32') {
+    return path.join(process.env.VITE_PUBLIC, 'app-icon.ico')
+  }
+
+  return path.join(process.env.VITE_PUBLIC, 'app-icon.png')
+}
+
+function getFallbackTrayIcon() {
+  return nativeImage.createFromDataURL(
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA4AAAAOCAQAAAC1QeVaAAAAV0lEQVR4AWOgO3fu3D8QGv///x8mA0QwQJwBUsLw//9/GA0Q5wJxDkQDJDkQzYHkQDSB5EAwQJwD0QBJDoQzQJIj2Q0QZ0A0gORAMECcA9EASQ6EM0CSI8kNAJY9D0G3gkQ2AAAAAElFTkSuQmCC',
+  )
+}
+
+function getTrayIcon() {
+  const iconPath = getTrayIconPath()
+  const icon = nativeImage.createFromPath(iconPath)
+  if (!icon.isEmpty()) return icon
+
+  const fallback = getFallbackTrayIcon()
+  if (!fallback.isEmpty()) return fallback
+
+  return nativeImage.createEmpty()
+}
+
+function showMainWindow() {
+  if (!win || win.isDestroyed()) {
+    createWindow()
+    return
+  }
+
+  win.show()
+  if (win.isMinimized()) win.restore()
+  win.focus()
+}
+
+function updateTrayMenu() {
+  if (!tray) return
+
+  const menu = Menu.buildFromTemplate([
+    {
+      label: 'Aircommands 열기',
+      click: () => showMainWindow(),
+    },
+    {
+      label: gestureNotificationsEnabled ? '제스처 알림 끄기' : '제스처 알림 켜기',
+      click: () => {
+        gestureNotificationsEnabled = !gestureNotificationsEnabled
+        updateTrayMenu()
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '종료',
+      click: () => {
+        isQuitting = true
+        app.quit()
+      },
+    },
+  ])
+
+  tray.setContextMenu(menu)
+}
+
+function createTray() {
+  if (tray) return
+
+  tray = new Tray(getTrayIcon())
+  tray.setToolTip('Aircommands')
+  tray.on('double-click', () => showMainWindow())
+  tray.on('click', () => showMainWindow())
+  updateTrayMenu()
+}
+
+function notifyGesture(payload: {
+  status: 'success' | 'failure'
+  gestureLabel: string
+  appLabel: string
+  message?: string
+}) {
+  if (!gestureNotificationsEnabled) return
+  if (!Notification.isSupported()) return
+
+  const title = payload.status === 'success'
+    ? `제스처 성공: ${payload.gestureLabel}`
+    : `제스처 실패: ${payload.gestureLabel}`
+
+  const body = payload.status === 'success'
+    ? `${payload.appLabel} 실행 요청을 보냈습니다.`
+    : payload.message
+      ? `${payload.appLabel} 실행 실패 - ${payload.message}`
+      : `${payload.appLabel} 실행에 실패했습니다.`
+
+  const notification = new Notification({
+    title,
+    body,
+    icon: getNotificationIconPath(),
+  })
+  notification.show()
+}
+
+function notifyTrayBackgroundRecognition() {
+  if (trayBackgroundNoticeShown) return
+  if (!Notification.isSupported()) return
+
+  trayBackgroundNoticeShown = true
+
+  const notification = new Notification({
+    title: 'Aircommands가 트레이에서 실행 중입니다',
+    body: '창을 닫아도 제스처 인식은 계속 동작합니다. 다시 열려면 트레이 아이콘을 클릭하세요.',
+    icon: getNotificationIconPath(),
+  })
+  notification.show()
+}
+
+function parseNotifyPayload(payload: unknown): {
+  status: 'success' | 'failure'
+  gestureLabel: string
+  appLabel: string
+  message?: string
+} | null {
+  if (!payload || typeof payload !== 'object') return null
+
+  const candidate = payload as Record<string, unknown>
+  if (candidate.status !== 'success' && candidate.status !== 'failure') return null
+  if (typeof candidate.gestureLabel !== 'string' || typeof candidate.appLabel !== 'string') return null
+  if (candidate.message !== undefined && typeof candidate.message !== 'string') return null
+
+  return {
+    status: candidate.status,
+    gestureLabel: candidate.gestureLabel,
+    appLabel: candidate.appLabel,
+    message: candidate.message,
+  }
+}
 
 async function createWindow() {
   win = new BrowserWindow({
     title: 'Main window',
-    icon: path.join(process.env.VITE_PUBLIC, 'favicon.ico'),
+    icon: getWindowIconPath(),
     webPreferences: {
       preload,
+      backgroundThrottling: false,
       // Warning: Enable nodeIntegration and disable contextIsolation is not secure in production
       // nodeIntegration: true,
 
@@ -76,22 +225,44 @@ async function createWindow() {
     if (url.startsWith('https:')) shell.openExternal(url)
     return { action: 'deny' }
   })
+
+  win.on('close', (event) => {
+    if (isQuitting) return
+    event.preventDefault()
+    win?.hide()
+    notifyTrayBackgroundRecognition()
+  })
+
+  win.on('minimize', () => {
+    if (isQuitting) return
+    win?.hide()
+  })
+
   // win.webContents.on('will-navigate', (event, url) => { }) #344
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  try {
+    createTray()
+  } catch (error) {
+    console.error('Failed to create tray icon:', error)
+  }
+  createWindow()
+}).catch((error) => {
+  console.error('App initialization failed:', error)
+})
 
 app.on('window-all-closed', () => {
   win = null
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin' && isQuitting) app.quit()
+})
+
+app.on('before-quit', () => {
+  isQuitting = true
 })
 
 app.on('second-instance', () => {
-  if (win) {
-    // Focus on the main window if the user tried to open another
-    if (win.isMinimized()) win.restore()
-    win.focus()
-  }
+  showMainWindow()
 })
 
 app.on('activate', () => {
@@ -105,4 +276,14 @@ app.on('activate', () => {
 
 ipcMain.handle('app:open', async (_event, payload) => {
   return openAppRequest(payload)
+})
+
+ipcMain.handle('app:notify-gesture', async (_event, payload) => {
+  const notifyPayload = parseNotifyPayload(payload)
+  if (!notifyPayload) {
+    return { success: false, error: 'INVALID_NOTIFY_PAYLOAD' }
+  }
+
+  notifyGesture(notifyPayload)
+  return { success: true }
 })

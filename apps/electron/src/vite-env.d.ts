@@ -35,6 +35,12 @@ interface Window {
         requestId: string
       }
     >
+    notifyGesture(payload: {
+      status: 'success' | 'failure'
+      gestureLabel: string
+      appLabel: string
+      message?: string
+    }): Promise<{ success: true } | { success: false, error: 'INVALID_NOTIFY_PAYLOAD' }>
     onMainProcessMessage(listener: (message: string) => void): () => void
   }
 }
