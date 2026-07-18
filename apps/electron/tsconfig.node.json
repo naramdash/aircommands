@@ -5,10 +5,17 @@
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "verbatimModuleSyntax": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["electron", "vite.config.ts", "package.json"]
+  "include": [
+    "electron",
+    "build",
+    "vite.config.ts",
+    "package.json"
+  ]
 }

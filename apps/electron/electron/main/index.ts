@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import os from 'node:os'
 import { openAppRequest } from './services/open_app'
+import appIdentity from '../../build/app_identity.json'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -30,7 +31,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 if (process.platform === 'win32' && os.release().startsWith('6.1')) app.disableHardwareAcceleration()
 
 // Set application name for Windows 10+ notifications
-if (process.platform === 'win32') app.setAppUserModelId(app.getName())
+if (process.platform === 'win32') app.setAppUserModelId(appIdentity.appId)
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -137,6 +138,11 @@ function showNotification(title: string, body: string) {
     body,
     icon: getNotificationIconPath(),
   })
+
+  notification.on('click', () => {
+    showMainWindow()
+  })
+
   notification.show()
 }
 
