@@ -1,19 +1,15 @@
-# AirCommands
+# AirCommands Web App
 
-AirCommands is a Nuxt app that uses MediaPipe Hand Landmarker to run local app
-commands from two-hand finger-touch gestures.
+Nuxt app and Nitro API for gesture-driven local app launch.
 
-The current interaction model is:
+## Gesture Model
 
-1. Show both hands to the camera.
-2. Touch one left-hand fingertip to one right-hand fingertip.
-3. Hold the contact briefly.
-4. The matching command is executed through the local server API.
+Current recognition is touch-based:
 
-The app supports all `5 x 5` fingertip combinations:
+- two-hand touches: 5 x 5 fingertip combinations (25)
+- one-hand touches: thumb + index/middle/ring on each hand (6)
 
-- left thumb/index/middle/ring/pinky
-- right thumb/index/middle/ring/pinky
+Total supported command gestures: 31.
 
 ## Commands
 
@@ -23,16 +19,37 @@ bun run test
 bun run build
 ```
 
-Do not start the dev server automatically for verification. The repository
-instructions require static inspection, targeted tests, and production builds
-unless the user explicitly approves runtime browser verification.
+Optional local runtime commands:
+
+```bash
+bun run dev
+bun run preview
+```
+
+## Server Endpoints
+
+- POST /api/apps/open
+- POST /api/open-chrome (legacy compatibility route)
 
 ## Key Files
 
-- `app/app.vue`: camera UI, two-hand fingertip overlay, command execution flow
-- `app/utils/gesture_command_detection/touch_detection.ts`: 5x5 touch detection
-- `app/utils/gesture_command_detection/recognition_reducer.ts`: touch hold and cooldown state machine
-- `app/utils/gesture_command_detection/command_map.ts`: generated 25 gesture command list
-- `server/api/apps/open.post.ts`: app launch API
-- `server/utils/apps.ts`: allowlisted local apps
-- `../../docs/`: current product, architecture, recognition, API, and test documents
+- app/app.vue: camera UI and recognition flow
+- app/utils/gesture_command_detection/command_map.ts
+- app/utils/gesture_command_detection/touch_detection.ts
+- app/utils/gesture_command_detection/recognition_reducer.ts
+- server/api/apps/open.post.ts
+- server/utils/open_app.ts
+
+## Test Scope
+
+Vitest runs tests from:
+
+- app/**/__tests__
+- server/**/__tests__
+- test/unit
+- test/e2e
+
+## Verification Policy
+
+- Do not auto-start dev server for verification tasks.
+- Prefer static analysis, targeted tests, and build checks unless runtime verification is explicitly requested.

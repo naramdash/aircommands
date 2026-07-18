@@ -1,27 +1,47 @@
 # AirCommands Monorepo
 
-This repository is a Bun workspace monorepo.
+AirCommands is a Bun workspace with two active apps:
 
-## Workspace Layout
+- apps/electron: Electron desktop app (camera UI, tray, notifications, IPC)
+- apps/web: Nuxt app + Nitro local API
+- docs: repository documentation aligned to current code
 
-- `apps/aircommands-web`: Nuxt client and Nitro API for gesture-driven app commands
-- `docs`: Product, architecture, API, and verification documents
+## Workspace Structure
 
-## Commands
+- apps/electron
+- apps/web
+- docs
 
-Install dependencies from the repository root:
+## Root Commands
 
 ```bash
 bun install
+bun run builds
 ```
 
-Run app package checks:
+`bun run builds` runs the `build` script in each workspace app.
+
+## App Commands
+
+Electron app:
 
 ```bash
-cd apps/aircommands-web
+cd apps/electron
+bun run build
+```
+
+Web app:
+
+```bash
+cd apps/web
 bun run test
 bun run build
 ```
 
-Do not start a dev server automatically for verification. Use static inspection,
-targeted tests, and production builds unless runtime verification is explicitly approved.
+## Verification Policy
+
+- Do not auto-start dev servers for verification.
+- Prefer static inspection, targeted tests, and production builds.
+- Use Bun-first commands.
+
+See docs/README.md for the full technical index.

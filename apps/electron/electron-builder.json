@@ -1,8 +1,8 @@
 {
   "$schema": "./node_modules/app-builder-lib/scheme.json",
-  "appId": "YourAppID",
+  "appId": "com.aircommands.desktop",
   "asar": true,
-  "productName": "YourAppName",
+  "productName": "AirCommands",
   "directories": {
     "output": "release/${version}"
   },
