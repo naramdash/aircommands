@@ -20,7 +20,7 @@ app.vue
 
 ## Key Modules
 
-### `app/app.vue`
+### `apps/aircommands-web/app/app.vue`
 
 - Starts/stops camera.
 - Runs MediaPipe per animation frame.
@@ -67,4 +67,4 @@ POST /api/apps/open
 ```
 
 The server never executes arbitrary user-provided commands. It only runs entries
-from `server/utils/apps.ts`.
+from `apps/aircommands-web/server/utils/apps.ts`.

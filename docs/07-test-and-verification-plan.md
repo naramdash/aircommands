@@ -5,7 +5,7 @@
 Run:
 
 ```bash
-npm run test
+cd apps/aircommands-web && bun run test
 ```
 
 Current test coverage:
@@ -32,7 +32,7 @@ Current test coverage:
 Run:
 
 ```bash
-npm run build
+cd apps/aircommands-web && bun run build
 ```
 
 Build must pass. Existing Nuxt sourcemap and dependency deprecation warnings do

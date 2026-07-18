@@ -38,11 +38,11 @@
 
 ## 현재 코드 기준 사실
 
-- 클라이언트 진입점은 [../app/app.vue](../app/app.vue)이다.
+- 클라이언트 진입점은 [../apps/aircommands-web/app/app.vue](../apps/aircommands-web/app/app.vue)이다.
 - MediaPipe `HandLandmarker`는 `numHands: 2`로 초기화된다.
-- 접촉 인식은 [../app/utils/gesture_command_detection/touch_detection.ts](../app/utils/gesture_command_detection/touch_detection.ts)에 있다.
-- 인식 상태 머신은 [../app/utils/gesture_command_detection/recognition_reducer.ts](../app/utils/gesture_command_detection/recognition_reducer.ts)에 있다.
-- 지원 제스처 목록은 [../app/utils/gesture_command_detection/command_map.ts](../app/utils/gesture_command_detection/command_map.ts)에서 생성된다.
-- 서버 앱 실행 API는 [../server/api/apps/open.post.ts](../server/api/apps/open.post.ts)이다.
-- 앱 allowlist는 [../server/utils/apps.ts](../server/utils/apps.ts)에 있다.
+- 접촉 인식은 [../apps/aircommands-web/app/utils/gesture_command_detection/touch_detection.ts](../apps/aircommands-web/app/utils/gesture_command_detection/touch_detection.ts)에 있다.
+- 인식 상태 머신은 [../apps/aircommands-web/app/utils/gesture_command_detection/recognition_reducer.ts](../apps/aircommands-web/app/utils/gesture_command_detection/recognition_reducer.ts)에 있다.
+- 지원 제스처 목록은 [../apps/aircommands-web/app/utils/gesture_command_detection/command_map.ts](../apps/aircommands-web/app/utils/gesture_command_detection/command_map.ts)에서 생성된다.
+- 서버 앱 실행 API는 [../apps/aircommands-web/server/api/apps/open.post.ts](../apps/aircommands-web/server/api/apps/open.post.ts)이다.
+- 앱 allowlist는 [../apps/aircommands-web/server/utils/apps.ts](../apps/aircommands-web/server/utils/apps.ts)에 있다.
 - 자동 dev server 실행은 금지되어 있다. 런타임 검증이 필요하면 사용자에게 먼저 허락을 받아야 한다.

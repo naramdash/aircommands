@@ -33,14 +33,14 @@ used by the client and dedupe logic.
 
 ## Error Responses
 
-| Error | Meaning |
-| --- | --- |
-| `INVALID_BODY` | Missing or invalid app name. |
-| `APPLICATION_NOT_FOUND` | App is not in the allowlist. |
-| `DUPLICATE_REQUEST` | Same request id was recently processed. |
-| `EXECUTION_FAILED` | OS command returned failure. |
+| Error                   | Meaning                                 |
+| ----------------------- | --------------------------------------- |
+| `INVALID_BODY`          | Missing or invalid app name.            |
+| `APPLICATION_NOT_FOUND` | App is not in the allowlist.            |
+| `DUPLICATE_REQUEST`     | Same request id was recently processed. |
+| `EXECUTION_FAILED`      | OS command returned failure.            |
 
 ## Security Boundary
 
 The API does not run arbitrary commands from the request body. It maps `app` to
-an allowlisted command in `server/utils/apps.ts`.
+an allowlisted command in `apps/aircommands-web/server/utils/apps.ts`.

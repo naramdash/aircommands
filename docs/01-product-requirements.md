@@ -45,9 +45,9 @@ touch_left_thumb_right_index
 
 ## Completion Definition
 
-- `app/app.vue` uses two-hand touch detection, not pointer trail recognition.
+- `apps/aircommands-web/app/app.vue` uses two-hand touch detection, not pointer trail recognition.
 - `command_map.ts` exposes exactly 25 touch commands.
 - `touch_detection.ts` normalizes fingertip distance by hand scale.
 - `recognition_reducer.ts` requires stable contact hold before execution.
-- `npm run test` passes.
-- `npm run build` passes.
+- `cd apps/aircommands-web && bun run test` passes.
+- `cd apps/aircommands-web && bun run build` passes.

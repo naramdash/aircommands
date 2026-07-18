@@ -3,16 +3,17 @@
 ## Files
 
 ```text
-app/
-  app.vue
-  utils/
-    hand_landmark_detection.ts
-    gesture_command_detection/
-      command_map.ts
-      coordinates.ts
-      recognition_reducer.ts
-      touch_detection.ts
-      types.ts
+apps/aircommands-web/
+  app/
+    app.vue
+    utils/
+      hand_landmark_detection.ts
+      gesture_command_detection/
+        command_map.ts
+        coordinates.ts
+        recognition_reducer.ts
+        touch_detection.ts
+        types.ts
 ```
 
 ## `types.ts`
@@ -62,13 +63,13 @@ reduceRecognitionFrame(context, frame, now)
 
 Reducer states:
 
-| State | Meaning |
-| --- | --- |
-| `tracking` | Waiting for both hands and a valid contact. |
-| `touching` | A stable contact is being held. |
-| `executing` | An execution candidate has been emitted. |
-| `cooldown` | Duplicate execution is suppressed. |
-| `error` | Last execution failed. |
+| State       | Meaning                                     |
+| ----------- | ------------------------------------------- |
+| `tracking`  | Waiting for both hands and a valid contact. |
+| `touching`  | A stable contact is being held.             |
+| `executing` | An execution candidate has been emitted.    |
+| `cooldown`  | Duplicate execution is suppressed.          |
+| `error`     | Last execution failed.                      |
 
 ## `app.vue`
 

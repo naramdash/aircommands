@@ -1,0 +1,25 @@
+{
+  "name": "aircommands-electron",
+  "version": "0.1.0",
+  "main": "dist-electron/main/index.js",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build && electron-builder",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@mediapipe/tasks-vision": "^0.10.35",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.5",
+    "vite-plugin-electron": "^1.1.0",
+    "vite-plugin-electron-renderer": "^1.0.0",
+    "vue": "^3.5.40",
+    "vue-tsc": "^3.3.7"
+  }
+}

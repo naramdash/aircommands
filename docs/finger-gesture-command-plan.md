@@ -19,12 +19,12 @@ the pair and executes the mapped allowlisted app command.
 ## Finger Set
 
 | Finger | Landmark |
-| --- | --- |
-| thumb | 4 |
-| index | 8 |
-| middle | 12 |
-| ring | 16 |
-| pinky | 20 |
+| ------ | -------- |
+| thumb  | 4        |
+| index  | 8        |
+| middle | 12       |
+| ring   | 16       |
+| pinky  | 20       |
 
 ## Command Generation
 
@@ -61,6 +61,6 @@ fingerDefinitions.flatMap(left =>
 
 ## Verification
 
-- `npm run test`
-- `npm run build`
+- `cd apps/aircommands-web && bun run test`
+- `cd apps/aircommands-web && bun run build`
 - Manual camera verification only after explicit approval.

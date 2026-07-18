@@ -1,38 +1,27 @@
-# AirCommands
+# AirCommands Monorepo
 
-AirCommands is a Nuxt app that uses MediaPipe Hand Landmarker to run local app
-commands from two-hand finger-touch gestures.
+This repository is a Bun workspace monorepo.
 
-The current interaction model is:
+## Workspace Layout
 
-1. Show both hands to the camera.
-2. Touch one left-hand fingertip to one right-hand fingertip.
-3. Hold the contact briefly.
-4. The matching command is executed through the local server API.
-
-The app supports all `5 x 5` fingertip combinations:
-
-- left thumb/index/middle/ring/pinky
-- right thumb/index/middle/ring/pinky
+- `apps/aircommands-web`: Nuxt client and Nitro API for gesture-driven app commands
+- `docs`: Product, architecture, API, and verification documents
 
 ## Commands
 
+Install dependencies from the repository root:
+
 ```bash
-npm install
-npm run test
-npm run build
+bun install
 ```
 
-Do not start the dev server automatically for verification. The repository
-instructions require static inspection, targeted tests, and production builds
-unless the user explicitly approves runtime browser verification.
+Run app package checks:
 
-## Key Files
+```bash
+cd apps/aircommands-web
+bun run test
+bun run build
+```
 
-- `app/app.vue`: camera UI, two-hand fingertip overlay, command execution flow
-- `app/utils/gesture_command_detection/touch_detection.ts`: 5x5 touch detection
-- `app/utils/gesture_command_detection/recognition_reducer.ts`: touch hold and cooldown state machine
-- `app/utils/gesture_command_detection/command_map.ts`: generated 25 gesture command list
-- `server/api/apps/open.post.ts`: app launch API
-- `server/utils/apps.ts`: allowlisted local apps
-- `docs/`: current product, architecture, recognition, API, and test documents
+Do not start a dev server automatically for verification. Use static inspection,
+targeted tests, and production builds unless runtime verification is explicitly approved.

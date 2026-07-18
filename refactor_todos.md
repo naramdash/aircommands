@@ -180,30 +180,30 @@ Client-side fetch abort does not stop the server process launched by `exec`. A s
 
 **Problem**
 
-`scripts/run-tests.mjs` is an older Node test runner path, while `package.json` now uses Vitest. README still documents only two-hand gestures and npm commands, while the app now supports one-hand contacts and prefers Bun.
+`apps/aircommands-web/scripts/run-tests.mjs` was an older Node test runner path, while the app package now uses Vitest. README previously documented npm commands, while project instructions prefer Bun.
 
 **Relevant code**
 
-- `scripts/run-tests.mjs`
-- `README.md`
-- `package.json`
+- `apps/aircommands-web/scripts/run-tests.mjs`
+- `apps/aircommands-web/README.md`
+- `apps/aircommands-web/package.json`
 - `AGENTS.md`
 
 **Refactor**
 
-- Remove `scripts/run-tests.mjs` if it is no longer used.
+- Remove `apps/aircommands-web/scripts/run-tests.mjs` if it is no longer used.
 - Update README commands to Bun-first with npm fallback if needed.
 - Update README interaction model to include one-hand thumb contacts.
 - Keep docs aligned with current gesture command map.
 
 **Verification**
 
-- Search for references to `scripts/run-tests.mjs`.
+- Search for references to `apps/aircommands-web/scripts/run-tests.mjs`.
 - Run tests/build after removing obsolete files.
 
 ## Current Verification Baseline
 
-- `npm test` passes: 5 files, 24 tests.
-- `npm run build` passes.
-- `bun` is preferred by project instructions, but the current shell does not have `bun` on PATH.
+- `bun run test` passes: 5 files, 24 tests.
+- `bun run build` passes.
+- `bun` is available on PATH.
 - Dev server and browser runtime verification are intentionally not started automatically.
