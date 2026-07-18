@@ -1,4 +1,4 @@
-import { AVAILABLE_APPS, getAppCommand } from './apps'
+import { AVAILABLE_APPS, getAppCommands } from './apps'
 import { runAppCommand, type CommandResult } from './app_command_runner'
 import { buildOpenAppRequestInput } from './open_app_request_input'
 
@@ -31,7 +31,7 @@ export type OpenAppResponse =
 
 export type OpenAppOptions = {
   now?: number
-  runner?: (command: string) => Promise<CommandResult>
+  runner?: (command: string | string[]) => Promise<CommandResult>
 }
 
 const REQUEST_DEDUPE_MS = 3000
@@ -75,8 +75,8 @@ export async function openAppRequest(
 
   recentRequests.set(requestId, now)
 
-  const command = getAppCommand(app)
-  if (!command) {
+  const commands = getAppCommands(app)
+  if (!commands) {
     return {
       success: false,
       app,
@@ -87,7 +87,7 @@ export async function openAppRequest(
     }
   }
 
-  const result = await runner(command)
+  const result = await runner(commands)
   if (!result.success) {
     return {
       success: false,

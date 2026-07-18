@@ -1,11 +1,9 @@
 import { app, BrowserWindow, shell, ipcMain, Menu, Notification, Tray, nativeImage } from 'electron'
-import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import os from 'node:os'
 import { openAppRequest } from './services/open_app'
 
-const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // The built directory structure
@@ -46,21 +44,23 @@ let gestureNotificationsEnabled = true
 let trayBackgroundNoticeShown = false
 const preload = path.join(__dirname, '../preload/index.mjs')
 const indexHtml = path.join(RENDERER_DIST, 'index.html')
+const APP_ICON_PNG = 'app-icon.png'
+const APP_ICON_ICO = 'app-icon.ico'
 
 function getTrayIconPath() {
-  return path.join(process.env.VITE_PUBLIC, 'app-icon.png')
+  return path.join(process.env.VITE_PUBLIC, APP_ICON_PNG)
 }
 
 function getNotificationIconPath() {
-  return path.join(process.env.VITE_PUBLIC, 'app-icon.png')
+  return path.join(process.env.VITE_PUBLIC, APP_ICON_PNG)
 }
 
 function getWindowIconPath() {
   if (process.platform === 'win32') {
-    return path.join(process.env.VITE_PUBLIC, 'app-icon.ico')
+    return path.join(process.env.VITE_PUBLIC, APP_ICON_ICO)
   }
 
-  return path.join(process.env.VITE_PUBLIC, 'app-icon.png')
+  return path.join(process.env.VITE_PUBLIC, APP_ICON_PNG)
 }
 
 function getFallbackTrayIcon() {
@@ -129,6 +129,17 @@ function createTray() {
   updateTrayMenu()
 }
 
+function showNotification(title: string, body: string) {
+  if (!Notification.isSupported()) return
+
+  const notification = new Notification({
+    title,
+    body,
+    icon: getNotificationIconPath(),
+  })
+  notification.show()
+}
+
 function notifyGesture(payload: {
   status: 'success' | 'failure'
   gestureLabel: string
@@ -136,7 +147,6 @@ function notifyGesture(payload: {
   message?: string
 }) {
   if (!gestureNotificationsEnabled) return
-  if (!Notification.isSupported()) return
 
   const title = payload.status === 'success'
     ? `제스처 성공: ${payload.gestureLabel}`
@@ -148,26 +158,18 @@ function notifyGesture(payload: {
       ? `${payload.appLabel} 실행 실패 - ${payload.message}`
       : `${payload.appLabel} 실행에 실패했습니다.`
 
-  const notification = new Notification({
-    title,
-    body,
-    icon: getNotificationIconPath(),
-  })
-  notification.show()
+  showNotification(title, body)
 }
 
 function notifyTrayBackgroundRecognition() {
   if (trayBackgroundNoticeShown) return
-  if (!Notification.isSupported()) return
 
   trayBackgroundNoticeShown = true
 
-  const notification = new Notification({
-    title: 'Aircommands가 트레이에서 실행 중입니다',
-    body: '창을 닫아도 제스처 인식은 계속 동작합니다. 다시 열려면 트레이 아이콘을 클릭하세요.',
-    icon: getNotificationIconPath(),
-  })
-  notification.show()
+  showNotification(
+    'Aircommands가 트레이에서 실행 중입니다',
+    '창을 닫아도 제스처 인식은 계속 동작합니다. 다시 열려면 트레이 아이콘을 클릭하세요.',
+  )
 }
 
 function parseNotifyPayload(payload: unknown): {
@@ -227,7 +229,7 @@ async function createWindow() {
   })
 
   win.on('close', (event) => {
-    if (isQuitting) return
+    if (isQuitting || !tray) return
     event.preventDefault()
     win?.hide()
     notifyTrayBackgroundRecognition()
