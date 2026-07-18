@@ -1,0 +1,2 @@
+# Hide vendored/generated MediaPipe runtime assets from GitHub language stats and PR noise
+apps/electron/public/mediapipe/** linguist-vendored=true linguist-generated=true
