@@ -136,11 +136,13 @@ export const AVAILABLE_APPS: AppConfig[] = [
   },
 ]
 
-export function getAppCommands(appName: string): string[] | null {
+export function getAppCommands(
+  appName: string,
+  currentPlatform: NodeJS.Platform = platform(),
+): string[] | null {
   const app = AVAILABLE_APPS.find((item) => item.name.toLowerCase() === appName.toLowerCase())
   if (!app) return null
 
-  const currentPlatform = platform()
   if (currentPlatform === 'win32') return app.windows
   if (currentPlatform === 'darwin') return app.darwin
   return app.linux

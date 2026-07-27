@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 
 contextBridge.exposeInMainWorld('aircommands', {
   openApp(payload: {
-    app?: unknown
+    applicationId?: unknown
     source?: unknown
     gesture?: unknown
     clientRequestId?: unknown
@@ -39,6 +39,55 @@ contextBridge.exposeInMainWorld('aircommands', {
     message?: unknown
   }) {
     return ipcRenderer.invoke('app:notify-gesture', payload)
+  },
+  getSettings() {
+    return ipcRenderer.invoke('settings:get')
+  },
+  discoverApplications(payload: { forceRefresh?: boolean } = {}) {
+    return ipcRenderer.invoke('application:discover', payload)
+  },
+  addDiscoveredApplication(payload: { discoveryId: string }) {
+    return ipcRenderer.invoke('application:add-discovered', payload)
+  },
+  assignDiscoveredApplication(payload: { gesture: string, discoveryId: string }) {
+    return ipcRenderer.invoke('application:assign-discovered', payload)
+  },
+  pickAndAssignApplication(payload: { gesture: string }) {
+    return ipcRenderer.invoke('application:pick-and-assign', payload)
+  },
+  replaceApplicationWithDiscovered(payload: {
+    applicationId: string
+    discoveryId: string
+  }) {
+    return ipcRenderer.invoke('application:replace-discovered', payload)
+  },
+  pickApplication() {
+    return ipcRenderer.invoke('application:pick')
+  },
+  renameApplication(payload: { applicationId: string, name: string }) {
+    return ipcRenderer.invoke('application:rename', payload)
+  },
+  replaceApplicationTarget(payload: { applicationId: string }) {
+    return ipcRenderer.invoke('application:replace-target', payload)
+  },
+  removeApplication(payload: { applicationId: string }) {
+    return ipcRenderer.invoke('application:remove', payload)
+  },
+  assignGesture(payload: { gesture: string, applicationId: string | null }) {
+    return ipcRenderer.invoke('gesture:assign', payload)
+  },
+  clearGestureAssignments() {
+    return ipcRenderer.invoke('gesture:clear-all')
+  },
+  testApplication(payload: { applicationId: string }) {
+    return ipcRenderer.invoke('application:test', payload)
+  },
+  onApplicationCatalogUpdated(listener: (result: unknown) => void) {
+    const wrapped = (_event: Electron.IpcRendererEvent, result: unknown) => {
+      listener(result)
+    }
+    ipcRenderer.on('application-catalog-updated', wrapped)
+    return () => ipcRenderer.off('application-catalog-updated', wrapped)
   },
   onMainProcessMessage(listener: (message: string) => void) {
     const wrapped = (_event: Electron.IpcRendererEvent, value: string) => {

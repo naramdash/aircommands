@@ -11,6 +11,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "vitest run",
     "build": "vue-tsc --noEmit && vite build && electron-builder --config electron-builder.config.mjs --publish never",
     "preview": "vite preview"
   },
@@ -23,6 +24,7 @@
     "vite": "^8.1.5",
     "vite-plugin-electron": "^1.1.0",
     "vite-plugin-electron-renderer": "^1.0.0",
+    "vitest": "^4.1.10",
     "vue": "^3.5.40",
     "vue-tsc": "^3.3.7"
   }

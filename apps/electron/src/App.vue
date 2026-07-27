@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import ApplicationPickerDialog from './components/ApplicationPickerDialog.vue'
 import {
-  fingerDefinitions,
   oneHandTouchGestureCommands,
   touchGestureCommands,
-  twoHandTouchGestureCommands,
 } from './utils/gesture_command_detection/command_map'
 import {
   createRecognitionContext,
   reduceRecognitionFrame,
 } from './utils/gesture_command_detection/recognition_reducer'
-import { getTwoHandTouchFrame } from './utils/gesture_command_detection/touch_detection'
+import { getTouchFrame } from './utils/gesture_command_detection/touch_detection'
 import type {
   FingerName,
   FingerTip,
@@ -18,7 +17,7 @@ import type {
   GestureName,
   RecognitionState,
   TouchContact,
-  TwoHandTouchFrame,
+  TouchFrame,
 } from './utils/gesture_command_detection/types'
 import { handLandmarker } from './utils/hand_landmark_detection'
 
@@ -52,6 +51,13 @@ const touchDistanceText = ref('없음')
 const cooldownRemainingMs = ref(0)
 const commandResultMessage = ref('')
 const gestureCompletionNotice = ref('')
+const settings = ref<UserSettingsView | null>(null)
+const applicationPickerGesture = ref<GestureName | null>(null)
+const isClearingAssignments = ref(false)
+const isEditingCommands = computed(() => Boolean(applicationPickerGesture.value))
+const hasGestureAssignments = computed(() =>
+  Object.values(settings.value?.gestureAssignments ?? {})
+    .some((applicationId) => applicationId !== null))
 const isRecognitionOnHold = computed(() => Boolean(poseWarning.value))
 const oneHandGestureGroups = computed(() => [
   {
@@ -73,26 +79,15 @@ const activeTouchCommand = computed(() => {
   return touchGestureCommands.find((command) => command.gesture === currentTouchGesture.value) ?? null
 })
 
-const touchGestureRows = computed(() => {
-  return fingerDefinitions.map((leftFinger) => ({
-    leftFinger,
-    commands: fingerDefinitions.map((rightFinger) => {
-      const command = twoHandTouchGestureCommands.find((item) => {
-        return item.leftFinger === leftFinger.name && item.rightFinger === rightFinger.name
-      })
-
-      if (!command) {
-        throw new Error(`Missing touch command for ${leftFinger.name}/${rightFinger.name}`)
-      }
-
-      return command
-    }),
-  }))
+const activeTouchApplication = computed(() => {
+  if (!activeTouchCommand.value) return null
+  return getApplicationForGesture(activeTouchCommand.value.gesture)
 })
 
 const cooldownSeconds = computed(() => Math.ceil(cooldownRemainingMs.value / 1000))
 
 const trackingStatus = computed(() => {
+  if (isEditingCommands.value) return '프로그램 선택 중'
   if (!isCameraActive.value) return '카메라 대기'
   if (recognitionState.value === 'executing') return '실행 중'
   if (recognitionState.value === 'cooldown') return '쿨다운'
@@ -106,6 +101,7 @@ const trackingStatus = computed(() => {
 })
 
 const phaseGuideText = computed(() => {
+  if (isEditingCommands.value) return '프로그램 선택 중에는 제스처 실행이 일시 정지됩니다'
   if (!isCameraActive.value) return '카메라를 시작하세요'
   if (!isLeftHandVisible.value && !isRightHandVisible.value) return '손을 화면에 보여주세요'
   if (poseWarning.value) return poseWarning.value
@@ -113,33 +109,103 @@ const phaseGuideText = computed(() => {
   if (recognitionState.value === 'executing') return '명령 실행 중입니다'
   if (recognitionState.value === 'cooldown') return '다음 입력을 잠시 대기합니다'
   if (recognitionState.value === 'error') return '오류 상태입니다'
-  return '양손 손가락을 맞대거나, 한 손에서 엄지와 검지/중지/약지를 맞대세요'
+  return '한 손에서 엄지와 검지·중지·약지 중 하나를 맞대세요'
 })
 
 function getFingerColor(finger: FingerName) {
   return `rgb(${FINGER_COLORS[finger]})`
 }
 
-function getAppShortLabel(label: string) {
-  return label.replace(/\s*실행$/, '')
+function getApplicationForGesture(gesture: GestureName) {
+  const applicationId = settings.value?.gestureAssignments[gesture]
+  if (!applicationId) return null
+  return settings.value?.applications.find((application) => application.id === applicationId) ?? null
 }
 
-function getFingerShortLabel(finger: FingerName) {
-  return fingerDefinitions.find((item) => item.name === finger)?.shortLabel ?? finger
+function getGestureApplicationLabel(gesture: GestureName) {
+  return getApplicationForGesture(gesture)?.name ?? '미지정'
 }
 
-function getAppIcon(app: string) {
-  const iconMap: Record<string, string> = {
-    chrome: '🌐',
-    notepad: '📝',
-    vscode: '💻',
-    terminal: '🖥️',
-    paint: '🎨',
-    word: '📄',
-    spotify: '🎵',
+function getGestureApplicationIcon(gesture: GestureName) {
+  return getApplicationForGesture(gesture)?.iconText ?? '➖'
+}
+
+function getGestureApplicationIconDataUrl(gesture: GestureName) {
+  return getApplicationForGesture(gesture)?.iconDataUrl
+}
+
+function updateSettings(nextSettings: UserSettingsView) {
+  const currentIcons = new Map(
+    settings.value?.applications.flatMap((application) =>
+      application.iconDataUrl ? [[application.id, application.iconDataUrl] as const] : []) ?? [],
+  )
+  settings.value = {
+    ...nextSettings,
+    applications: nextSettings.applications.map((application) => ({
+      ...application,
+      iconDataUrl: application.iconDataUrl ?? currentIcons.get(application.id),
+    })),
   }
+}
 
-  return iconMap[app] ?? '☁️'
+function openApplicationPicker(gesture: GestureName) {
+  if (!settings.value) return
+  applicationPickerGesture.value = gesture
+}
+
+function handleSettingsStatus(message: string, isError: boolean) {
+  if (isError) {
+    errorMessage.value = message
+    commandResultMessage.value = ''
+  } else {
+    commandResultMessage.value = message
+    errorMessage.value = ''
+  }
+}
+
+async function clearAllGestureAssignments() {
+  isClearingAssignments.value = true
+  try {
+    const response = await window.aircommands.clearGestureAssignments()
+    if (!response.success) {
+      handleSettingsStatus(response.message, true)
+      return
+    }
+    if (response.canceled) return
+    if (response.settings) updateSettings(response.settings)
+    handleSettingsStatus(
+      response.clearedAssignments
+        ? `제스처 배정 ${response.clearedAssignments}개를 모두 비웠습니다.`
+        : '비울 제스처 배정이 없습니다.',
+      false,
+    )
+  } catch (error) {
+    handleSettingsStatus(
+      error instanceof Error ? error.message : '제스처 배정을 비우지 못했습니다.',
+      true,
+    )
+  } finally {
+    isClearingAssignments.value = false
+  }
+}
+
+async function loadSettings() {
+  try {
+    const response = await window.aircommands.getSettings()
+    if (!response.success) {
+      errorMessage.value = response.message
+      return
+    }
+
+    settings.value = response.settings
+    if (response.settings.recoveryNotice) {
+      errorMessage.value = response.settings.recoveryNotice
+    }
+  } catch (error) {
+    errorMessage.value = error instanceof Error
+      ? error.message
+      : '프로그램 설정을 불러오지 못했습니다.'
+  }
 }
 
 let mediaStream: MediaStream | null = null
@@ -148,6 +214,7 @@ let recognitionContext = createRecognitionContext()
 let gestureCompletionTimer: ReturnType<typeof setTimeout> | null = null
 let successfulTouchContact: TouchContact | null = null
 let successfulTouchUntil = 0
+let removeCatalogListener: (() => void) | null = null
 
 async function startCamera() {
   errorMessage.value = ''
@@ -211,7 +278,7 @@ function drawCameraFrame() {
 
     const now = performance.now()
     const result = handLandmarker.detectForVideo(video, now)
-    const touchFrame = getTwoHandTouchFrame(result.landmarks, result.handednesses, now)
+    const touchFrame = getTouchFrame(result.landmarks, result.handednesses, now)
     const recognitionResult = reduceRecognitionFrame(recognitionContext, touchFrame, now)
 
     const activeContact = recognitionResult.context.activeTouch ?? touchFrame.closestContact
@@ -232,7 +299,7 @@ function drawCameraFrame() {
     recognitionContext = recognitionResult.context
     syncRecognitionDisplay(touchFrame, now)
 
-    if (recognitionResult.executionCandidate) {
+    if (recognitionResult.executionCandidate && !isEditingCommands.value) {
       showGestureCompletionNotice(recognitionResult.executionCandidate)
       void executeCandidate(recognitionResult.executionCandidate)
     }
@@ -264,7 +331,7 @@ function drawFingerTips(
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
-  frame: TwoHandTouchFrame,
+  frame: TouchFrame,
   activeContact: TouchContact | null,
   successContact: TouchContact | null,
 ) {
@@ -286,19 +353,11 @@ function drawFingerTip(
   const x = tip.point.x * width
   const y = tip.point.y * height
   const isActive =
-    activeContact?.contactType === 'two_hand'
-      ? hand === 'left'
-        ? activeContact.leftFinger === tip.finger
-        : activeContact.rightFinger === tip.finger
-      : activeContact?.hand === (hand === 'left' ? 'Left' : 'Right') &&
-        (activeContact.primaryFinger === tip.finger || activeContact.secondaryFinger === tip.finger)
+    activeContact?.hand === (hand === 'left' ? 'Left' : 'Right') &&
+    (activeContact.primaryFinger === tip.finger || activeContact.secondaryFinger === tip.finger)
   const isSuccess =
-    successContact?.contactType === 'two_hand'
-      ? hand === 'left'
-        ? successContact.leftFinger === tip.finger
-        : successContact.rightFinger === tip.finger
-      : successContact?.hand === (hand === 'left' ? 'Left' : 'Right') &&
-        (successContact.primaryFinger === tip.finger || successContact.secondaryFinger === tip.finger)
+    successContact?.hand === (hand === 'left' ? 'Left' : 'Right') &&
+    (successContact.primaryFinger === tip.finger || successContact.secondaryFinger === tip.finger)
   const radius = isActive || isSuccess ? ACTIVE_FINGER_RADIUS : FINGER_RADIUS
   const color = FINGER_COLORS[tip.finger]
 
@@ -355,10 +414,10 @@ function drawTouchContact(
 ) {
   if (!contact) return
 
-  const leftX = contact.leftPoint.x * width
-  const leftY = contact.leftPoint.y * height
-  const rightX = contact.rightPoint.x * width
-  const rightY = contact.rightPoint.y * height
+  const primaryX = contact.primaryPoint.x * width
+  const primaryY = contact.primaryPoint.y * height
+  const secondaryX = contact.secondaryPoint.x * width
+  const secondaryY = contact.secondaryPoint.y * height
   const centerX = contact.midpoint.x * width
   const centerY = contact.midpoint.y * height
   const ringRadius = 17
@@ -372,8 +431,8 @@ function drawTouchContact(
   context.lineWidth = isSuccess ? 5 : 4
   context.setLineDash([])
   context.beginPath()
-  context.moveTo(leftX, leftY)
-  context.lineTo(rightX, rightY)
+  context.moveTo(primaryX, primaryY)
+  context.lineTo(secondaryX, secondaryY)
   context.stroke()
 
   // Add a subtle dashed guide to make contact lines easier to see in dim backgrounds.
@@ -381,8 +440,8 @@ function drawTouchContact(
   context.lineWidth = 2
   context.setLineDash([6, 4])
   context.beginPath()
-  context.moveTo(leftX, leftY)
-  context.lineTo(rightX, rightY)
+  context.moveTo(primaryX, primaryY)
+  context.lineTo(secondaryX, secondaryY)
   context.stroke()
   context.setLineDash([])
 
@@ -417,7 +476,7 @@ function resetRecognition() {
   clearGestureCompletionNotice()
 }
 
-function syncRecognitionDisplay(frame: TwoHandTouchFrame, now: number) {
+function syncRecognitionDisplay(frame: TouchFrame, now: number) {
   isLeftHandVisible.value = frame.leftHandVisible
   isRightHandVisible.value = frame.rightHandVisible
   poseWarning.value = getPoseWarning(frame)
@@ -427,7 +486,7 @@ function syncRecognitionDisplay(frame: TwoHandTouchFrame, now: number) {
     : null
 
   currentCandidateLabel.value = recognitionContext.candidate
-    ? `${recognitionContext.candidate.gestureLabel} / ${recognitionContext.candidate.label}`
+    ? `${recognitionContext.candidate.gestureLabel} / ${getGestureApplicationLabel(recognitionContext.candidate.gesture)}`
     : '없음'
   currentTouchLabel.value = visibleContact ? getTouchLabel(visibleContact) : '없음'
   currentTouchGesture.value = visibleContact?.gesture ?? ''
@@ -444,7 +503,7 @@ function getTouchLabel(contact: TouchContact) {
   return command?.gestureLabel ?? contact.gesture
 }
 
-function getPoseWarning(frame: TwoHandTouchFrame) {
+function getPoseWarning(frame: TouchFrame) {
   const blockedPose = [frame.leftPoseQuality, frame.rightPoseQuality].find((quality) => quality && !quality.isAcceptable)
   if (!blockedPose) return ''
   if (blockedPose.reason === 'palm_edge_on') {
@@ -490,45 +549,56 @@ async function notifyGestureResult(payload: {
 }
 
 async function executeCandidate(candidate: GestureCandidate) {
-  commandResultMessage.value = `${candidate.label} 요청 중`
+  const applicationId = settings.value?.gestureAssignments[candidate.gesture]
+  const application = applicationId
+    ? settings.value?.applications.find((item) => item.id === applicationId)
+    : null
+  if (!applicationId || !application) {
+    commandResultMessage.value = `${candidate.gestureLabel} 미배정`
+    errorMessage.value = '이 제스처에 프로그램이 배정되지 않았습니다.'
+    return
+  }
+
+  const applicationLabel = `${application.name} 실행`
+  commandResultMessage.value = `${applicationLabel} 요청 중`
   const timeoutId = window.setTimeout(() => {
-    commandResultMessage.value = `${candidate.label} 실패`
+    commandResultMessage.value = `${applicationLabel} 실패`
     errorMessage.value = '앱 실행 요청이 지연되어 인식 흐름에서 분리했습니다.'
   }, EXECUTION_REQUEST_TIMEOUT_MS)
 
   try {
     const response = await window.aircommands.openApp({
-      app: candidate.app,
+      applicationId,
       source: 'gesture',
       gesture: candidate.gesture,
-      clientRequestId: `${candidate.gesture}-${candidate.app}-${Math.round(candidate.detectedAt)}`,
+      clientRequestId: `${candidate.gesture}-${applicationId}-${Math.round(candidate.detectedAt)}`,
     })
 
     if (response.success) {
-      commandResultMessage.value = `${candidate.label} 완료`
+      commandResultMessage.value = `${applicationLabel} 완료`
       await notifyGestureResult({
         status: 'success',
         gestureLabel: candidate.gestureLabel,
-        appLabel: candidate.label,
+        appLabel: application.name,
       })
     } else {
-      commandResultMessage.value = `${candidate.label} 실패`
+      commandResultMessage.value = `${applicationLabel} 실패`
       errorMessage.value = response.message
       await notifyGestureResult({
         status: 'failure',
         gestureLabel: candidate.gestureLabel,
-        appLabel: candidate.label,
+        appLabel: application.name,
         message: response.message,
       })
     }
   } catch (error) {
-    commandResultMessage.value = `${candidate.label} 실패`
+    commandResultMessage.value = `${applicationLabel} 실패`
     const message = error instanceof Error ? error.message : '앱 실행 요청에 실패했습니다.'
     errorMessage.value = message
     await notifyGestureResult({
       status: 'failure',
       gestureLabel: candidate.gestureLabel,
-      appLabel: candidate.label,
+      appLabel: application.name,
       message,
     })
   } finally {
@@ -536,11 +606,31 @@ async function executeCandidate(candidate: GestureCandidate) {
   }
 }
 
-onMounted(() => {
-  void startCamera()
+onMounted(async () => {
+  removeCatalogListener = window.aircommands.onApplicationCatalogUpdated((response) => {
+    if (!response.success || !settings.value) return
+    const discoveredIcons = new Map(
+      response.applications.flatMap((application) =>
+        application.registeredApplicationId && application.iconDataUrl
+          ? [[application.registeredApplicationId, application.iconDataUrl] as const]
+          : []),
+    )
+    if (discoveredIcons.size === 0) return
+
+    settings.value = {
+      ...settings.value,
+      applications: settings.value.applications.map((application) => ({
+        ...application,
+        iconDataUrl: discoveredIcons.get(application.id) ?? application.iconDataUrl,
+      })),
+    }
+  })
+  await loadSettings()
+  await startCamera()
 })
 
 onBeforeUnmount(() => {
+  removeCatalogListener?.()
   clearGestureCompletionNotice()
   stopCamera()
 })
@@ -591,57 +681,10 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="matrix-card">
-      <h2>양손 접촉 명령 (5x5)</h2>
-      <div class="matrix-grid">
-        <div class="matrix-head matrix-axis-corner">
-          <span class="axis-shape square" aria-hidden="true" />
-          <span class="axis-corner-label">L/R</span>
-          <span class="axis-shape triangle" aria-hidden="true" />
-        </div>
-        <div v-for="rightFinger in fingerDefinitions" :key="rightFinger.name" class="matrix-head">
-          <span class="axis-badge right">
-            <span
-              class="axis-shape triangle"
-              :style="{ borderBottomColor: getFingerColor(rightFinger.name) }"
-              aria-hidden="true" />
-            <span>{{ rightFinger.label }}</span>
-          </span>
-        </div>
-
-        <template v-for="row in touchGestureRows" :key="row.leftFinger.name">
-          <div class="matrix-side">
-            <span class="axis-badge left">
-              <span
-                class="axis-shape square"
-                :style="{ background: getFingerColor(row.leftFinger.name), boxShadow: `0 0 0 1px ${getFingerColor(row.leftFinger.name)}77` }"
-                aria-hidden="true" />
-              <span>{{ row.leftFinger.label }}</span>
-            </span>
-          </div>
-          <button
-            v-for="command in row.commands"
-            :key="command.gesture"
-            type="button"
-            class="matrix-cell"
-            :class="command.gesture === currentTouchGesture ? 'active' : ''"
-            :title="`${command.gestureLabel} / ${command.label}`">
-            <div class="cell-mark">
-              <span class="mark-shape dot" :style="{ backgroundColor: getFingerColor(command.leftFinger) }" aria-hidden="true" />
-              <span class="mark-plus">+</span>
-              <span class="mark-shape tri" :style="{ borderBottomColor: getFingerColor(command.rightFinger) }" aria-hidden="true" />
-              <span>{{ getFingerShortLabel(command.leftFinger) }}+{{ getFingerShortLabel(command.rightFinger) }}</span>
-            </div>
-            <div class="cell-app">{{ getAppIcon(command.app) }} {{ getAppShortLabel(command.label) }}</div>
-          </button>
-        </template>
-      </div>
-    </section>
-
     <section class="one-hand-grid">
       <article v-for="group in oneHandGestureGroups" :key="group.hand" class="one-hand-card">
         <header>
-          <h3>{{ group.label }} 한손 접촉</h3>
+          <h3>{{ group.label }} 제스처</h3>
           <span class="shape-chip" :class="group.hand === 'Left' ? 'left' : 'right'">
             <span class="shape-icon" :class="group.hand === 'Left' ? 'square' : 'triangle'" aria-hidden="true" />
             <span>{{ group.shapeLabel }} 표시</span>
@@ -651,7 +694,11 @@ onBeforeUnmount(() => {
           <li
             v-for="command in group.commands"
             :key="command.gesture"
-            :class="command.gesture === currentTouchGesture ? 'active' : ''">
+            :class="command.gesture === currentTouchGesture ? 'active' : ''"
+            tabindex="0"
+            role="button"
+            @click="openApplicationPicker(command.gesture)"
+            @keydown.enter="openApplicationPicker(command.gesture)">
             <span class="gesture-label-line">
               <span
                 class="mark-shape"
@@ -670,7 +717,15 @@ onBeforeUnmount(() => {
                 aria-hidden="true" />
               <span>{{ command.gestureLabel }}</span>
             </span>
-            <strong>{{ getAppIcon(command.app) }} {{ getAppShortLabel(command.label) }}</strong>
+            <strong>
+              <img
+                v-if="getGestureApplicationIconDataUrl(command.gesture)"
+                :src="getGestureApplicationIconDataUrl(command.gesture)"
+                alt=""
+                class="gesture-application-icon">
+              <span v-else>{{ getGestureApplicationIcon(command.gesture) }}</span>
+              {{ getGestureApplicationLabel(command.gesture) }}
+            </strong>
           </li>
         </ul>
       </article>
@@ -680,10 +735,34 @@ onBeforeUnmount(() => {
       <button v-if="!isCameraActive" type="button" class="primary" @click="startCamera">시작</button>
       <button v-else type="button" class="secondary" @click="stopCamera">정지</button>
 
-      <span v-if="activeTouchCommand" class="pill">현재 앱: {{ getAppIcon(activeTouchCommand.app) }} {{ getAppShortLabel(activeTouchCommand.label) }}</span>
+      <span v-if="activeTouchCommand" class="pill">
+        현재 앱:
+        <img
+          v-if="activeTouchApplication?.iconDataUrl"
+          :src="activeTouchApplication.iconDataUrl"
+          alt=""
+          class="gesture-application-icon">
+        <span v-else>{{ activeTouchApplication?.iconText ?? '➖' }}</span>
+        {{ activeTouchApplication?.name ?? '미지정' }}
+      </span>
       <span v-if="commandResultMessage" class="pill success">{{ commandResultMessage }}</span>
       <span v-if="errorMessage" class="pill warn">{{ errorMessage }}</span>
+      <button
+        type="button"
+        class="secondary compact reset-button"
+        :disabled="!hasGestureAssignments || isClearingAssignments || isEditingCommands"
+        @click="clearAllGestureAssignments">
+        {{ isClearingAssignments ? '비우는 중…' : '모든 배정 해제' }}
+      </button>
     </footer>
+
+    <ApplicationPickerDialog
+      v-if="applicationPickerGesture && settings"
+      :settings="settings"
+      :gesture="applicationPickerGesture"
+      @close="applicationPickerGesture = null"
+      @update="updateSettings"
+      @status="handleSettingsStatus" />
   </main>
 </template>
 
@@ -694,7 +773,7 @@ onBeforeUnmount(() => {
   padding: 16px;
   display: grid;
   gap: 12px;
-  grid-template-rows: auto auto auto auto;
+  grid-template-rows: auto auto auto;
   box-sizing: border-box;
   max-width: 1280px;
   margin: 0 auto;
@@ -721,7 +800,6 @@ onBeforeUnmount(() => {
 }
 
 .camera-card,
-.matrix-card,
 .one-hand-card {
   border: 1px solid rgba(94, 119, 150, 0.35);
   border-radius: 14px;
@@ -835,114 +913,6 @@ onBeforeUnmount(() => {
   line-height: 1.35;
 }
 
-.matrix-card {
-  padding: 12px;
-  overflow-x: auto;
-}
-
-.matrix-card h2 {
-  margin: 0 0 10px;
-  font-size: 16px;
-  letter-spacing: 0.01em;
-}
-
-.matrix-grid {
-  display: grid;
-  grid-template-columns: 64px repeat(5, minmax(108px, 1fr));
-  gap: 6px;
-  min-width: 640px;
-}
-
-.matrix-head,
-.matrix-side,
-.matrix-cell {
-  border-radius: 10px;
-  border: 1px solid rgba(94, 119, 150, 0.45);
-  background: rgba(9, 16, 28, 0.88);
-}
-
-.matrix-head,
-.matrix-side {
-  display: grid;
-  place-items: center;
-  height: 44px;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.matrix-axis-corner {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.axis-corner-label {
-  color: #c8d8ec;
-  font-weight: 800;
-  letter-spacing: 0.01em;
-}
-
-.axis-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  line-height: 1;
-}
-
-.axis-badge.left {
-  color: #7dd3fc;
-}
-
-.axis-badge.right {
-  color: #fbbf24;
-}
-
-.axis-shape {
-  display: inline-block;
-  flex: 0 0 auto;
-}
-
-.axis-shape.square {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  background: #38bdf8;
-  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.45);
-}
-
-.axis-shape.triangle {
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 11px solid #f59e0b;
-  filter: drop-shadow(0 0 1px rgba(251, 191, 36, 0.5));
-}
-
-.matrix-cell {
-  height: 58px;
-  color: #d7e2ef;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 2px;
-}
-
-.matrix-cell.active {
-  border-color: #38bdf8;
-  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.45);
-  background: rgba(56, 189, 248, 0.14);
-}
-
-.cell-mark {
-  font-size: 13px;
-  font-weight: 800;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .mark-plus {
   color: #9eb6d1;
   font-weight: 700;
@@ -967,12 +937,6 @@ onBeforeUnmount(() => {
   border-right: 7px solid transparent;
   border-bottom: 13px solid #38bdf8;
   transform: translateY(-1px);
-}
-
-.cell-app {
-  font-size: 11px;
-  color: #aac0d8;
-  font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', 'Segoe UI Variable', 'Pretendard Variable', sans-serif;
 }
 
 .one-hand-grid {
@@ -1065,6 +1029,20 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+.one-hand-card li strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.gesture-application-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  vertical-align: middle;
+}
+
 .one-hand-card li.active {
   border-color: #38bdf8;
   background: rgba(56, 189, 248, 0.15);
@@ -1102,6 +1080,22 @@ button.secondary {
   border: 1px solid #4f6a89;
 }
 
+.reset-button {
+  margin-left: auto;
+  color: #fca5a5 !important;
+  border-color: rgba(248, 113, 113, 0.5) !important;
+}
+
+button.compact {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .pill {
   border: 1px solid #49637e;
   border-radius: 999px;
@@ -1136,6 +1130,10 @@ button.secondary {
   .bottom-bar {
     justify-content: center;
   }
+
+  .reset-button {
+    margin-left: 0;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1145,11 +1143,6 @@ button.secondary {
 
   .status-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .matrix-grid {
-    grid-template-columns: 48px repeat(5, minmax(98px, 1fr));
-    min-width: 560px;
   }
 
   .status-label {

@@ -4,15 +4,21 @@
 
 Current model is touch-based, not stroke/shape-based:
 
-- two-hand touches: 5 left fingertips x 5 right fingertips = 25
 - one-hand touches: thumb with index/middle/ring for each hand = 6
 
-Total command gestures: 31
+Total command gestures: 6. The former 25-command two-hand matrix and its
+cross-hand contact detection have been removed.
+
+All six gestures start unassigned. A program is launched only after the user
+explicitly assigns it.
+
+The renderer exposes a confirmed `모든 배정 해제` action. It clears only gesture
+assignments; registered and discovered application data remains intact.
 
 ## Core Modules
 
 - command_map.ts: generates gesture-command mapping
-- touch_detection.ts: computes closest valid touch candidates
+- touch_detection.ts: computes the closest valid thumb-to-finger candidate per hand
 - recognition_reducer.ts: hold/cooldown state transitions
 - types.ts: shared gesture and frame contracts
 

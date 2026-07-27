@@ -17,11 +17,10 @@ export type FingerName = 'thumb' | 'index' | 'middle' | 'ring' | 'pinky'
 export type OneHandTouchFingerName = 'index' | 'middle' | 'ring'
 export type OneHandTouchHand = 'left' | 'right'
 
-export type TwoHandTouchGestureName = `touch_left_${FingerName}_right_${FingerName}`
 export type OneHandTouchGestureName =
   `touch_${OneHandTouchHand}_thumb_${OneHandTouchFingerName}`
 
-export type GestureName = TwoHandTouchGestureName | OneHandTouchGestureName
+export type GestureName = OneHandTouchGestureName
 
 export type FingerDefinition = {
   name: FingerName
@@ -30,39 +29,20 @@ export type FingerDefinition = {
   landmarkIndex: number
 }
 
-export type AppName =
-  | 'chrome'
-  | 'notepad'
-  | 'vscode'
-  | 'terminal'
-  | 'paint'
-  | 'word'
-  | 'spotify'
-
 export type BaseGestureCommand = {
   gesture: GestureName
-  app: AppName
-  label: string
   gestureLabel: string
   mark: string
 }
 
-export type TwoHandGestureCommand = BaseGestureCommand & {
-  contactType: 'two_hand'
-  gesture: TwoHandTouchGestureName
-  leftFinger: FingerName
-  rightFinger: FingerName
-}
-
 export type OneHandGestureCommand = BaseGestureCommand & {
-  contactType: 'one_hand'
   gesture: OneHandTouchGestureName
   hand: Exclude<Handedness, 'Unknown'>
   primaryFinger: 'thumb'
   secondaryFinger: OneHandTouchFingerName
 }
 
-export type GestureCommand = TwoHandGestureCommand | OneHandGestureCommand
+export type GestureCommand = OneHandGestureCommand
 
 export type GestureCandidate = GestureCommand & {
   confidence: number
@@ -102,14 +82,9 @@ export type HandPoseQuality = {
 
 export type TouchContact = {
   gesture: GestureName
-  contactType: 'two_hand' | 'one_hand'
-  hand: Handedness | 'Both'
+  hand: Exclude<Handedness, 'Unknown'>
   primaryFinger: FingerName
   secondaryFinger: FingerName
-  leftFinger?: FingerName
-  rightFinger?: FingerName
-  leftPoint: Point2D
-  rightPoint: Point2D
   primaryPoint: Point2D
   secondaryPoint: Point2D
   midpoint: Point2D
@@ -117,7 +92,7 @@ export type TouchContact = {
   confidence: number
 }
 
-export type TwoHandTouchFrame = {
+export type TouchFrame = {
   at: number
   leftHandVisible: boolean
   rightHandVisible: boolean

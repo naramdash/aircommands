@@ -9,7 +9,7 @@ import type {
   OneHandTouchFingerName,
   Point2D,
   TouchContact,
-  TwoHandTouchFrame,
+  TouchFrame,
 } from './types'
 
 export const TOUCH_ENTER_DISTANCE = 0.42
@@ -35,11 +35,11 @@ const FIST_FINGER_CHAINS = [
   [17, 18, 19, 20],
 ] as const
 
-export function getTwoHandTouchFrame(
+export function getTouchFrame(
   hands: NormalizedLandmark[][],
   handednesses: HandednessCategory[][] = [],
   at: number,
-): TwoHandTouchFrame {
+): TouchFrame {
   const leftHand = hands[getLeftHandIndex(handednesses)]
   const rightHand = hands[getRightHandIndex(handednesses)]
   const leftTips = leftHand ? getFingerTips(leftHand) : []
@@ -47,12 +47,6 @@ export function getTwoHandTouchFrame(
   const leftPoseQuality = leftHand ? getHandPoseQuality(leftHand, leftTips) : null
   const rightPoseQuality = rightHand ? getHandPoseQuality(rightHand, rightTips) : null
   const contactCandidates = [
-    leftHand &&
-      rightHand &&
-      leftPoseQuality?.isAcceptable &&
-      rightPoseQuality?.isAcceptable
-      ? getClosestTouchContact(leftHand, rightHand, leftTips, rightTips)
-      : null,
     leftHand && leftPoseQuality?.isAcceptable
       ? getClosestOneHandTouchContact(leftHand, 'Left', leftTips)
       : null,
@@ -94,63 +88,6 @@ export function getFingerTips(hand: NormalizedLandmark[]): FingerTip[] {
   })
 }
 
-export function getClosestTouchContact(
-  leftHand: NormalizedLandmark[],
-  rightHand: NormalizedLandmark[],
-  leftTips = getFingerTips(leftHand),
-  rightTips = getFingerTips(rightHand),
-): TouchContact | null {
-  const handScale = getAverageHandScale(leftHand, rightHand)
-  let closestContact: TouchContact | null = null
-
-  for (const leftTip of leftTips) {
-    for (const rightTip of rightTips) {
-      const normalizedDistance =
-        getDistance3D(leftTip.point, rightTip.point) / handScale
-      if (!isDepthDeltaAcceptable(leftTip.point, rightTip.point, handScale)) {
-        continue
-      }
-
-      const confidence = getTouchConfidence(normalizedDistance)
-      const contact: TouchContact = {
-        gesture: `touch_left_${leftTip.finger}_right_${rightTip.finger}`,
-        contactType: 'two_hand',
-        hand: 'Both',
-        primaryFinger: leftTip.finger,
-        secondaryFinger: rightTip.finger,
-        leftFinger: leftTip.finger,
-        rightFinger: rightTip.finger,
-        leftPoint: leftTip.point,
-        rightPoint: rightTip.point,
-        primaryPoint: leftTip.point,
-        secondaryPoint: rightTip.point,
-        midpoint: {
-          x: (leftTip.point.x + rightTip.point.x) / 2,
-          y: (leftTip.point.y + rightTip.point.y) / 2,
-        },
-        normalizedDistance,
-        confidence,
-      }
-
-      if (
-        !closestContact ||
-        contact.normalizedDistance < closestContact.normalizedDistance
-      ) {
-        closestContact = contact
-      }
-    }
-  }
-
-  if (
-    !closestContact ||
-    closestContact.normalizedDistance > TOUCH_EXIT_DISTANCE
-  ) {
-    return null
-  }
-
-  return closestContact
-}
-
 export function getClosestOneHandTouchContact(
   hand: NormalizedLandmark[],
   handedness: Handedness,
@@ -178,12 +115,9 @@ export function getClosestOneHandTouchContact(
     const confidence = getTouchConfidence(normalizedDistance)
     const contact: TouchContact = {
       gesture: `touch_${handPrefix}_thumb_${finger}`,
-      contactType: 'one_hand',
       hand: handedness,
       primaryFinger: 'thumb',
       secondaryFinger: finger,
-      leftPoint: thumbTip.point,
-      rightPoint: targetTip.point,
       primaryPoint: thumbTip.point,
       secondaryPoint: targetTip.point,
       midpoint: {
@@ -285,16 +219,6 @@ export function getHandPoseQuality(
     fingertipSpread,
     foldedFingerCount,
   }
-}
-
-function getAverageHandScale(
-  leftHand: NormalizedLandmark[],
-  rightHand: NormalizedLandmark[],
-) {
-  return Math.max(
-    (getHandScale(leftHand) + getHandScale(rightHand)) / 2,
-    TOUCH_MIN_HAND_SCALE,
-  )
 }
 
 function getHandScale(hand: NormalizedLandmark[]) {

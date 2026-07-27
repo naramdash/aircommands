@@ -2,26 +2,30 @@
 
 ## Request Shape
 
-Logical request fields:
+Electron request fields:
 
-- app: target app name
+- applicationId: registered application ID
 - source: request source label
 - gesture: gesture identifier
 - clientRequestId: optional dedupe key
+
+The Electron renderer cannot send raw paths, commands, or arguments to the launch
+endpoint. Web API requests retain their existing app-name contract.
 
 ## Response Shape
 
 ### Success
 
 - success: true
-- app: normalized app name
+- applicationId
+- applicationName
 - message
 - requestId
 
 ### Failure
 
 - success: false
-- app (optional)
+- applicationId (optional)
 - error (enum)
 - message
 - requestId
@@ -31,6 +35,8 @@ Logical request fields:
 
 - INVALID_BODY
 - APPLICATION_NOT_FOUND
+- APPLICATION_TARGET_MISSING (Electron)
+- UNSUPPORTED_PLATFORM (Electron)
 - DUPLICATE_REQUEST
 - EXECUTION_FAILED
 
@@ -40,9 +46,20 @@ Both app stacks maintain a short in-memory dedupe window (`REQUEST_DEDUPE_MS = 3
 
 ## Platform Command Mapping
 
-- Electron utilities (`apps/electron/electron/main/services/apps.ts`) now allow multiple commands per platform and run them as fallbacks.
+- Electron built-ins allow multiple commands per platform and run them as trusted fallbacks.
+- Windows user applications are validated `.exe`/`.lnk` paths and are launched with
+  Electron `shell.openPath`, without constructing a shell command.
+- Windows AppUserModelID targets are discovered in the main process and launched by
+  passing `shell:AppsFolder\<AppID>` as one argument to `explorer.exe`.
+- Steam targets persist only a validated numeric App ID. The main process resolves
+  `steam.exe` from trusted registry or conventional install locations and launches
+  it with separate `-applaunch` and App ID arguments, without shell parsing.
+- Discovery IDs are deterministic target hashes and must resolve against the
+  main-process discovery cache before registration or assignment.
 - Web utilities (`apps/web/server/utils/apps.ts`) currently map to one command per platform.
 
 ## Security Note
 
-Launching local apps is a privileged operation. Any externally reachable server deployment must add stronger origin/session protections before exposure.
+Launching local apps is a privileged operation. Electron resolves only persisted
+application IDs in the main process. Any externally reachable server deployment
+must add stronger origin/session protections before exposure.

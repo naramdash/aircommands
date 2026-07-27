@@ -1,5 +1,4 @@
 import type {
-  AppName,
   FingerDefinition,
   FingerName,
   GestureCommand,
@@ -7,7 +6,6 @@ import type {
   OneHandGestureCommand,
   OneHandTouchGestureName,
   OneHandTouchFingerName,
-  TwoHandGestureCommand,
 } from './types'
 
 export const fingerDefinitions: FingerDefinition[] = [
@@ -43,66 +41,24 @@ export const fingerDefinitions: FingerDefinition[] = [
   },
 ]
 
-const appCycle: Array<{
-  app: AppName
-  label: string
-}> = [
-    { app: 'chrome', label: 'Chrome 실행' },
-    { app: 'notepad', label: '메모장 실행' },
-    { app: 'vscode', label: 'VS Code 실행' },
-    { app: 'terminal', label: '터미널 실행' },
-    { app: 'paint', label: '그림판 실행' },
-    { app: 'word', label: 'Word 실행' },
-    { app: 'spotify', label: 'Spotify 실행' },
-  ]
-
 const oneHandTouchFingerNames: OneHandTouchFingerName[] = [
   'index',
   'middle',
   'ring',
 ]
 
-export const twoHandTouchGestureCommands: TwoHandGestureCommand[] =
-  fingerDefinitions.flatMap((leftFinger, leftIndex) => {
-    return fingerDefinitions.map((rightFinger, rightIndex) => {
-      const appCommand =
-        appCycle[(leftIndex * fingerDefinitions.length + rightIndex) % appCycle.length]
-      const gesture =
-        `touch_left_${leftFinger.name}_right_${rightFinger.name}` as const
-
-      return {
-        contactType: 'two_hand',
-        gesture,
-        gestureLabel: `왼손 ${leftFinger.label} + 오른손 ${rightFinger.label}`,
-        label: appCommand.label,
-        app: appCommand.app,
-        mark: `${leftFinger.shortLabel}+${rightFinger.shortLabel}`,
-        leftFinger: leftFinger.name,
-        rightFinger: rightFinger.name,
-      }
-    })
-  })
-
 export const oneHandTouchGestureCommands: OneHandGestureCommand[] =
-  (['Left', 'Right'] as const).flatMap((hand, handIndex) => {
-    return oneHandTouchFingerNames.map((fingerName, fingerIndex) => {
+  (['Left', 'Right'] as const).flatMap((hand) => {
+    return oneHandTouchFingerNames.map((fingerName) => {
       const thumb = getRequiredFingerDefinition('thumb')
       const finger = getRequiredFingerDefinition(fingerName)
-      const commandIndex =
-        twoHandTouchGestureCommands.length +
-        handIndex * oneHandTouchFingerNames.length +
-        fingerIndex
-      const appCommand = appCycle[commandIndex % appCycle.length]
       const handPrefix = hand === 'Left' ? 'left' : 'right'
       const handLabel = hand === 'Left' ? '왼손' : '오른손'
       const gesture = `touch_${handPrefix}_thumb_${fingerName}` as OneHandTouchGestureName
 
       return {
-        contactType: 'one_hand',
         gesture,
         gestureLabel: `${handLabel} ${thumb.label} + ${finger.label}`,
-        label: appCommand.label,
-        app: appCommand.app,
         mark: `${handLabel[0]} ${thumb.shortLabel}+${finger.shortLabel}`,
         hand,
         primaryFinger: 'thumb',
@@ -112,7 +68,6 @@ export const oneHandTouchGestureCommands: OneHandGestureCommand[] =
   })
 
 export const touchGestureCommands: GestureCommand[] = [
-  ...twoHandTouchGestureCommands,
   ...oneHandTouchGestureCommands,
 ]
 

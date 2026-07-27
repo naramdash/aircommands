@@ -4,7 +4,7 @@ import type {
   GestureCandidate,
   RecognitionState,
   TouchContact,
-  TwoHandTouchFrame,
+  TouchFrame,
 } from './types'
 
 export const TOUCH_HOLD_MS = 280
@@ -41,7 +41,7 @@ export function createRecognitionContext(): RecognitionContext {
 
 export function reduceRecognitionFrame(
   context: RecognitionContext,
-  frame: TwoHandTouchFrame | null,
+  frame: TouchFrame | null,
   now: number,
 ): RecognitionFrameResult {
   if (context.cooldownUntil > now) {

@@ -1,9 +1,14 @@
-import { AVAILABLE_APPS, getAppCommands } from './apps'
-import { runAppCommand, type CommandResult } from './app_command_runner'
-import { buildOpenAppRequestInput } from './open_app_request_input'
+import {
+  getApplicationSettingsStore,
+  type UserConfig,
+} from './application_settings'
+import {
+  launchApplication,
+  type ApplicationLaunchResult,
+} from './platform_application_adapter'
 
 export type OpenAppRequest = {
-  app?: unknown
+  applicationId?: unknown
   source?: unknown
   gesture?: unknown
   clientRequestId?: unknown
@@ -12,26 +17,31 @@ export type OpenAppRequest = {
 export type OpenAppResponse =
   | {
     success: true
-    app: string
+    applicationId: string
+    applicationName: string
     message: string
     requestId: string
   }
   | {
     success: false
-    app?: string
+    applicationId?: string
     error:
     | 'INVALID_BODY'
     | 'APPLICATION_NOT_FOUND'
+    | 'APPLICATION_TARGET_MISSING'
+    | 'UNSUPPORTED_PLATFORM'
     | 'DUPLICATE_REQUEST'
     | 'EXECUTION_FAILED'
     message: string
-    availableApps?: string[]
     requestId: string
   }
 
 export type OpenAppOptions = {
   now?: number
-  runner?: (command: string | string[]) => Promise<CommandResult>
+  settings?: UserConfig
+  launcher?: (
+    application: UserConfig['applications'][number],
+  ) => Promise<ApplicationLaunchResult>
 }
 
 const REQUEST_DEDUPE_MS = 3000
@@ -41,32 +51,28 @@ export async function openAppRequest(
   request: OpenAppRequest,
   options: OpenAppOptions = {},
 ): Promise<OpenAppResponse> {
-  const normalizedRequest = buildOpenAppRequestInput(request, {})
   const now = options.now ?? Date.now()
-  const runner = options.runner ?? runAppCommand
-  const requestId = getRequestId(normalizedRequest, now)
-
+  const requestId = getRequestId(request, now)
   pruneRecentRequests(now)
 
   if (
-    !isRecord(normalizedRequest) ||
-    typeof normalizedRequest.app !== 'string' ||
-    !normalizedRequest.app.trim()
+    !isRecord(request) ||
+    typeof request.applicationId !== 'string' ||
+    !request.applicationId.trim()
   ) {
     return {
       success: false,
       error: 'INVALID_BODY',
-      message: '실행할 앱 이름이 필요합니다.',
+      message: '실행할 프로그램 ID가 필요합니다.',
       requestId,
     }
   }
 
-  const app = normalizedRequest.app.trim().toLowerCase()
-
+  const applicationId = request.applicationId.trim()
   if (recentRequests.has(requestId)) {
     return {
       success: false,
-      app,
+      applicationId,
       error: 'DUPLICATE_REQUEST',
       message: '이미 처리 중이거나 최근 처리된 요청입니다.',
       requestId,
@@ -74,25 +80,24 @@ export async function openAppRequest(
   }
 
   recentRequests.set(requestId, now)
-
-  const commands = getAppCommands(app)
-  if (!commands) {
+  const settings = options.settings ?? await getApplicationSettingsStore().getSettings()
+  const application = settings.applications.find((item) => item.id === applicationId)
+  if (!application) {
     return {
       success: false,
-      app,
+      applicationId,
       error: 'APPLICATION_NOT_FOUND',
-      message: `등록되지 않은 앱입니다: ${app}`,
-      availableApps: AVAILABLE_APPS.map((availableApp) => availableApp.name),
+      message: '등록되지 않은 프로그램입니다.',
       requestId,
     }
   }
 
-  const result = await runner(commands)
+  const result = await (options.launcher ?? launchApplication)(application)
   if (!result.success) {
     return {
       success: false,
-      app,
-      error: 'EXECUTION_FAILED',
+      applicationId,
+      error: result.error,
       message: result.message,
       requestId,
     }
@@ -100,8 +105,9 @@ export async function openAppRequest(
 
   return {
     success: true,
-    app,
-    message: `${app} opened successfully`,
+    applicationId,
+    applicationName: application.name,
+    message: `${application.name} opened successfully`,
     requestId,
   }
 }
@@ -116,8 +122,11 @@ function getRequestId(request: OpenAppRequest, now: number) {
     if (requestId) return requestId
   }
 
-  const app = isRecord(request) && typeof request.app === 'string' ? request.app : 'unknown'
-  return `${app}-${now}`
+  const applicationId =
+    isRecord(request) && typeof request.applicationId === 'string'
+      ? request.applicationId
+      : 'unknown'
+  return `${applicationId}-${now}`
 }
 
 function pruneRecentRequests(now: number) {
