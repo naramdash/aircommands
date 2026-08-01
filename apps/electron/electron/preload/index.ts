@@ -82,6 +82,28 @@ contextBridge.exposeInMainWorld('aircommands', {
   testApplication(payload: { applicationId: string }) {
     return ipcRenderer.invoke('application:test', payload)
   },
+  closeBrowser() {
+    return ipcRenderer.invoke('browser:close')
+  },
+  getBrowserStatus() {
+    return ipcRenderer.invoke('browser:get-status')
+  },
+  getWebLoginSettings() {
+    return ipcRenderer.invoke('web-login:get-settings')
+  },
+  setWebLoginSettings(payload: { loginUrl: string; loginHint: string }) {
+    return ipcRenderer.invoke('web-login:set-settings', payload)
+  },
+  openWebLogin() {
+    return ipcRenderer.invoke('web-login:open')
+  },
+  onBrowserStatus(listener: (status: unknown) => void) {
+    const wrapped = (_event: Electron.IpcRendererEvent, status: unknown) => {
+      listener(status)
+    }
+    ipcRenderer.on('browser:status', wrapped)
+    return () => ipcRenderer.off('browser:status', wrapped)
+  },
   onApplicationCatalogUpdated(listener: (result: unknown) => void) {
     const wrapped = (_event: Electron.IpcRendererEvent, result: unknown) => {
       listener(result)

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ApplicationPickerDialog from './components/ApplicationPickerDialog.vue'
+import WebLoginDialog from './components/WebLoginDialog.vue'
 import {
   oneHandTouchGestureCommands,
   touchGestureCommands,
@@ -27,6 +28,7 @@ const TOUCH_COLOR = '250, 204, 21'
 const TOUCH_SUCCESS_COLOR = '34, 197, 94'
 const TOUCH_SUCCESS_HIGHLIGHT_MS = 900
 const EXECUTION_REQUEST_TIMEOUT_MS = 2500
+const WEB_LOGIN_GESTURE: GestureName = 'touch_left_thumb_ring'
 const FINGER_COLORS: Record<FingerName, string> = {
   thumb: '239, 68, 68',
   index: '34, 197, 94',
@@ -53,8 +55,10 @@ const commandResultMessage = ref('')
 const gestureCompletionNotice = ref('')
 const settings = ref<UserSettingsView | null>(null)
 const applicationPickerGesture = ref<GestureName | null>(null)
+const isWebLoginDialogOpen = ref(false)
 const isClearingAssignments = ref(false)
-const isEditingCommands = computed(() => Boolean(applicationPickerGesture.value))
+const isEditingCommands = computed(() =>
+  Boolean(applicationPickerGesture.value) || isWebLoginDialogOpen.value)
 const hasGestureAssignments = computed(() =>
   Object.values(settings.value?.gestureAssignments ?? {})
     .some((applicationId) => applicationId !== null))
@@ -82,6 +86,16 @@ const activeTouchCommand = computed(() => {
 const activeTouchApplication = computed(() => {
   if (!activeTouchCommand.value) return null
   return getApplicationForGesture(activeTouchCommand.value.gesture)
+})
+
+const activeTouchApplicationLabel = computed(() => {
+  if (!activeTouchCommand.value) return ''
+  return getGestureApplicationLabel(activeTouchCommand.value.gesture)
+})
+
+const activeTouchApplicationIcon = computed(() => {
+  if (!activeTouchCommand.value) return '➖'
+  return getGestureApplicationIcon(activeTouchCommand.value.gesture)
 })
 
 const cooldownSeconds = computed(() => Math.ceil(cooldownRemainingMs.value / 1000))
@@ -122,11 +136,17 @@ function getApplicationForGesture(gesture: GestureName) {
   return settings.value?.applications.find((application) => application.id === applicationId) ?? null
 }
 
+function isWebLoginGesture(gesture: GestureName) {
+  return gesture === WEB_LOGIN_GESTURE
+}
+
 function getGestureApplicationLabel(gesture: GestureName) {
+  if (isWebLoginGesture(gesture)) return 'Google 웹 로그인'
   return getApplicationForGesture(gesture)?.name ?? '미지정'
 }
 
 function getGestureApplicationIcon(gesture: GestureName) {
+  if (isWebLoginGesture(gesture)) return '🔐'
   return getApplicationForGesture(gesture)?.iconText ?? '➖'
 }
 
@@ -149,6 +169,10 @@ function updateSettings(nextSettings: UserSettingsView) {
 }
 
 function openApplicationPicker(gesture: GestureName) {
+  if (isWebLoginGesture(gesture)) {
+    isWebLoginDialogOpen.value = true
+    return
+  }
   if (!settings.value) return
   applicationPickerGesture.value = gesture
 }
@@ -549,6 +573,42 @@ async function notifyGestureResult(payload: {
 }
 
 async function executeCandidate(candidate: GestureCandidate) {
+  if (isWebLoginGesture(candidate.gesture)) {
+    const applicationLabel = 'Google 웹 로그인'
+    commandResultMessage.value = `${applicationLabel} 요청 중`
+    try {
+      const response = await window.aircommands.openWebLogin()
+      if (response.success) {
+        commandResultMessage.value = `${applicationLabel} 화면 열림`
+        await notifyGestureResult({
+          status: 'success',
+          gestureLabel: candidate.gestureLabel,
+          appLabel: applicationLabel,
+        })
+      } else {
+        commandResultMessage.value = `${applicationLabel} 실패`
+        errorMessage.value = response.message
+        await notifyGestureResult({
+          status: 'failure',
+          gestureLabel: candidate.gestureLabel,
+          appLabel: applicationLabel,
+          message: response.message,
+        })
+      }
+    } catch (error) {
+      commandResultMessage.value = `${applicationLabel} 실패`
+      const message = error instanceof Error ? error.message : 'Google 로그인 화면을 열지 못했습니다.'
+      errorMessage.value = message
+      await notifyGestureResult({
+        status: 'failure',
+        gestureLabel: candidate.gestureLabel,
+        appLabel: applicationLabel,
+        message,
+      })
+    }
+    return
+  }
+
   const applicationId = settings.value?.gestureAssignments[candidate.gesture]
   const application = applicationId
     ? settings.value?.applications.find((item) => item.id === applicationId)
@@ -694,7 +754,10 @@ onBeforeUnmount(() => {
           <li
             v-for="command in group.commands"
             :key="command.gesture"
-            :class="command.gesture === currentTouchGesture ? 'active' : ''"
+            :class="{
+              active: command.gesture === currentTouchGesture,
+              fixed: isWebLoginGesture(command.gesture),
+            }"
             tabindex="0"
             role="button"
             @click="openApplicationPicker(command.gesture)"
@@ -725,6 +788,7 @@ onBeforeUnmount(() => {
                 class="gesture-application-icon">
               <span v-else>{{ getGestureApplicationIcon(command.gesture) }}</span>
               {{ getGestureApplicationLabel(command.gesture) }}
+              <span v-if="isWebLoginGesture(command.gesture)" class="fixed-label">고정</span>
             </strong>
           </li>
         </ul>
@@ -742,8 +806,8 @@ onBeforeUnmount(() => {
           :src="activeTouchApplication.iconDataUrl"
           alt=""
           class="gesture-application-icon">
-        <span v-else>{{ activeTouchApplication?.iconText ?? '➖' }}</span>
-        {{ activeTouchApplication?.name ?? '미지정' }}
+        <span v-else>{{ activeTouchApplicationIcon }}</span>
+        {{ activeTouchApplicationLabel }}
       </span>
       <span v-if="commandResultMessage" class="pill success">{{ commandResultMessage }}</span>
       <span v-if="errorMessage" class="pill warn">{{ errorMessage }}</span>
@@ -763,6 +827,10 @@ onBeforeUnmount(() => {
       @close="applicationPickerGesture = null"
       @update="updateSettings"
       @status="handleSettingsStatus" />
+
+    <WebLoginDialog
+      v-if="isWebLoginDialogOpen"
+      @close="isWebLoginDialogOpen = false" />
   </main>
 </template>
 
@@ -1046,6 +1114,17 @@ onBeforeUnmount(() => {
 .one-hand-card li.active {
   border-color: #38bdf8;
   background: rgba(56, 189, 248, 0.15);
+}
+
+.one-hand-card li.fixed {
+  border-color: rgba(167, 139, 250, 0.65);
+  background: rgba(124, 58, 237, 0.12);
+}
+
+.fixed-label {
+  color: #c4b5fd;
+  font-size: 10px;
+  letter-spacing: 0.03em;
 }
 
 .bottom-bar {

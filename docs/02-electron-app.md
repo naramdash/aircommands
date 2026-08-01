@@ -35,6 +35,27 @@
    - `gesture:assign`
    - `gesture:clear-all`
    - `app:notify-gesture`
+   - `browser:close`
+   - `browser:get-status`
+   - `web-login:get-settings`
+   - `web-login:set-settings`
+   - `web-login:open`
+
+## Internal Google login browser
+
+- The browser uses the persistent `persist:aircommands-browser` session partition, so a user-completed login remains available after the browser window is closed and reopened.
+- The browser has no Node integration or Aircommands preload bridge. Web pages cannot access the desktop IPC surface.
+- The browser allows Google Identity popups in the same persistent session and automates only the configured button and account selection steps.
+- Password and two-factor authentication input remain manual.
+- Google may reject OAuth from an embedded user agent with `disallowed_useragent`; changing the user agent is not used as a workaround. A service-specific fallback may be needed if its Google Identity flow cannot run inside Electron.
+
+## Configured Google web login scenario
+
+- The `touch_left_thumb_ring` gesture (왼손 엄지 + 약지) is reserved for the configured Google web login scenario and is not assignable to a desktop application.
+- Clicking the fixed `touch_left_thumb_ring` gesture row opens a dialog where the user can save one website URL and Google `login_hint`. They are stored separately under the Electron user-data config directory.
+- Triggering the fixed gesture opens the saved URL in the persistent browser. After same-origin redirects, it reinitializes the page's Google Identity Services client with the saved `login_hint` and clicks the cross-origin GSI iframe through Chromium's `Input.dispatchMouseEvent` protocol.
+- The Electron GSI popup is monitored for Google Account Chooser. If it appears, Aircommands clicks only the account whose identifier exactly matches the saved `login_hint`; password, consent, and two-factor pages remain untouched.
+- The configured page callback remains responsible for handling the Google ID token. Aircommands never reads or stores the token, password, or two-factor code.
 
 ## IPC Contract (Renderer -> Main)
 

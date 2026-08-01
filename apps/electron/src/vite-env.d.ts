@@ -66,6 +66,15 @@ interface Window {
     testApplication(payload: {
       applicationId: string
     }): Promise<OpenAppResponse>
+    closeBrowser(): Promise<BrowserCloseResponse>
+    getBrowserStatus(): Promise<BrowserStatusResponse>
+    getWebLoginSettings(): Promise<WebLoginSettingsResponse>
+    setWebLoginSettings(payload: {
+      loginUrl: string
+      loginHint: string
+    }): Promise<WebLoginSettingsResponse>
+    openWebLogin(): Promise<WebLoginResponse>
+    onBrowserStatus(listener: (status: BrowserStatus) => void): () => void
     onApplicationCatalogUpdated(
       listener: (result: ApplicationDiscoveryResponse) => void
     ): () => void
@@ -141,4 +150,34 @@ type SettingsResponse =
 
 type SettingsMutationResponse =
   | { success: true, settings?: UserSettingsView }
+  | { success: false, error: string, message: string }
+
+type BrowserStatus = {
+  open: boolean
+  loading: boolean
+  url: string
+  title: string
+}
+
+type BrowserCloseResponse = {
+  success: true
+  status: BrowserStatus
+}
+
+type BrowserStatusResponse = {
+  success: true
+  status: BrowserStatus
+}
+
+type WebLoginSettings = {
+  loginUrl: string
+  loginHint: string
+}
+
+type WebLoginSettingsResponse =
+  | { success: true, settings: WebLoginSettings }
+  | { success: false, error: string, message: string }
+
+type WebLoginResponse =
+  | { success: true, status: BrowserStatus }
   | { success: false, error: string, message: string }
