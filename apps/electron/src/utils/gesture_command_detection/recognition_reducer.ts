@@ -43,6 +43,7 @@ export function reduceRecognitionFrame(
   context: RecognitionContext,
   frame: TouchFrame | null,
   now: number,
+  touchHoldMs = TOUCH_HOLD_MS,
 ): RecognitionFrameResult {
   if (context.cooldownUntil > now) {
     return {
@@ -84,7 +85,10 @@ export function reduceRecognitionFrame(
       return startTouch(context, contact, now)
     }
 
-    const progress = Math.min(1, (now - context.touchStartedAt) / TOUCH_HOLD_MS)
+    const effectiveTouchHoldMs = Number.isFinite(touchHoldMs) && touchHoldMs > 0
+      ? touchHoldMs
+      : TOUCH_HOLD_MS
+    const progress = Math.min(1, (now - context.touchStartedAt) / effectiveTouchHoldMs)
 
     if (progress < 1) {
       return {

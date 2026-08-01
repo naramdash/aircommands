@@ -25,7 +25,8 @@ describe('ApplicationSettingsStore', () => {
 
     const settings = await store.getSettings()
 
-    expect(settings.version).toBe(6)
+    expect(settings.version).toBe(7)
+    expect(settings.gestureHoldMs).toBe(280)
     expect(settings.applications).toHaveLength(21)
     expect(Object.keys(settings.gestureAssignments)).toHaveLength(6)
     expect(Object.values(settings.gestureAssignments).every((assignment) =>
@@ -125,6 +126,18 @@ describe('ApplicationSettingsStore', () => {
     expect((await store.getSettings()).inputSequenceAssignments[gesture]).toBeNull()
   })
 
+  it('persists a customized gesture hold duration and rejects out-of-range values', async () => {
+    const settingsPath = await createSettingsPath()
+    const store = new ApplicationSettingsStore(settingsPath)
+    await store.getSettings()
+
+    await store.setGestureHoldMs(80)
+    await expect(store.setGestureHoldMs(79)).rejects.toThrow('INVALID_GESTURE_HOLD_MS')
+
+    const reloaded = await new ApplicationSettingsStore(settingsPath).getSettings()
+    expect(reloaded.gestureHoldMs).toBe(80)
+  })
+
   it('deduplicates discovered targets and registers plus assigns atomically', async () => {
     const settingsPath = await createSettingsPath()
     const store = new ApplicationSettingsStore(settingsPath)
@@ -182,14 +195,14 @@ describe('ApplicationSettingsStore', () => {
     const migrated = await new ApplicationSettingsStore(settingsPath).getSettings()
     const persisted = JSON.parse(await readFile(settingsPath, 'utf8'))
 
-    expect(migrated.version).toBe(6)
+    expect(migrated.version).toBe(7)
     expect(migrated.gestureAssignments).not.toHaveProperty('touch_left_index_right_index')
     expect(persisted).toEqual(migrated)
   })
 })
 
 describe('migrateSettings', () => {
-  it('migrates v1 settings to v6 without changing custom one-hand assignments', () => {
+  it('migrates v1 settings to v7 without changing custom one-hand assignments', () => {
     const current = createDefaultSettings()
     const legacy = {
       ...current,
@@ -202,7 +215,8 @@ describe('migrateSettings', () => {
 
     const migrated = migrateSettings(legacy)
 
-    expect(migrated?.version).toBe(6)
+    expect(migrated?.version).toBe(7)
+    expect(migrated?.gestureHoldMs).toBe(280)
     expect(migrated?.applications).toEqual(current.applications)
     expect(migrated?.gestureAssignments).toEqual({
       ...current.gestureAssignments,
@@ -229,7 +243,7 @@ describe('migrateSettings', () => {
     })
   })
 
-  it('migrates v4 settings to v6 without changing user assignments', () => {
+  it('migrates v4 settings to v7 without changing user assignments', () => {
     const current = createDefaultSettings()
     const versionFourSettings = {
       ...current,
@@ -242,7 +256,7 @@ describe('migrateSettings', () => {
 
     expect(migrateSettings(versionFourSettings)).toEqual({
       ...versionFourSettings,
-      version: 6,
+      version: 7,
     })
   })
 
@@ -265,7 +279,7 @@ describe('migrateSettings', () => {
     expect(first.created).toBe(true)
     expect(second.created).toBe(false)
     expect(second.applicationId).toBe(first.applicationId)
-    expect(reloaded.version).toBe(6)
+    expect(reloaded.version).toBe(7)
     expect(reloaded.applications.filter((application) =>
       application.target.kind === 'steam-app')).toEqual([
       expect.objectContaining({
@@ -326,7 +340,10 @@ describe('migrateSettings', () => {
   })
 
   it('preserves valid v6 input sequences and drops invalid ones', () => {
-    const settings = createDefaultSettings()
+    const settings = {
+      ...createDefaultSettings(),
+      version: 6 as const,
+    }
     const validGesture = ALL_GESTURE_NAMES[0]
     const invalidGesture = ALL_GESTURE_NAMES[1]
     settings.inputSequenceAssignments[validGesture] = [
@@ -349,7 +366,7 @@ describe('migrateSettings', () => {
   })
 
   it('rejects unknown settings versions', () => {
-    expect(migrateSettings({ version: 7 })).toBeNull()
+    expect(migrateSettings({ version: 8 })).toBeNull()
   })
 })
 

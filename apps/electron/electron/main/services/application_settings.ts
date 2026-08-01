@@ -56,7 +56,15 @@ export type UserConfigV6 = {
   inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
 }
 
-export type UserConfig = UserConfigV6
+export type UserConfigV7 = {
+  version: 7
+  applications: ApplicationRecord[]
+  gestureAssignments: Record<string, string | null>
+  inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
+  gestureHoldMs: number
+}
+
+export type UserConfig = UserConfigV7
 
 export type ApplicationSummary = {
   id: string
@@ -71,12 +79,16 @@ export type UserSettingsView = {
   applications: ApplicationSummary[]
   gestureAssignments: Record<string, string | null>
   inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
+  gestureHoldMs: number
   platform: NodeJS.Platform
   supportsCustomApplications: boolean
   recoveryNotice?: string
 }
 
 const ONE_HAND_FINGER_NAMES = ['index', 'middle', 'ring'] as const
+export const DEFAULT_GESTURE_HOLD_MS = 280
+export const MIN_GESTURE_HOLD_MS = 80
+export const MAX_GESTURE_HOLD_MS = 2_000
 const LEGACY_DEFAULT_APP_CYCLE = [
   'chrome',
   'notepad',
@@ -152,10 +164,11 @@ export function createDefaultSettings(): UserConfig {
   )
 
   return {
-    version: 6,
+    version: 7,
     applications,
     gestureAssignments,
     inputSequenceAssignments,
+    gestureHoldMs: DEFAULT_GESTURE_HOLD_MS,
   }
 }
 
@@ -334,6 +347,15 @@ export class ApplicationSettingsStore {
     })
   }
 
+  async setGestureHoldMs(gestureHoldMs: number): Promise<UserConfig> {
+    return this.updateSettings((settings) => {
+      if (!isValidGestureHoldMs(gestureHoldMs)) {
+        throw new Error('INVALID_GESTURE_HOLD_MS')
+      }
+      settings.gestureHoldMs = gestureHoldMs
+    })
+  }
+
   async clearGestureAssignments(): Promise<{
     settings: UserConfig
     clearedAssignments: number
@@ -430,7 +452,8 @@ export function migrateSettings(value: unknown): UserConfig | null {
       value.version !== 3 &&
       value.version !== 4 &&
       value.version !== 5 &&
-      value.version !== 6
+      value.version !== 6 &&
+      value.version !== 7
     )
   ) {
     return null
@@ -488,17 +511,22 @@ export function migrateSettings(value: unknown): UserConfig | null {
     }
   }
 
+  const gestureHoldMs = value.version >= 7 && isValidGestureHoldMs(value.gestureHoldMs)
+    ? value.gestureHoldMs
+    : DEFAULT_GESTURE_HOLD_MS
+
   return {
-    version: 6,
+    version: 7,
     applications,
     gestureAssignments,
     inputSequenceAssignments,
+    gestureHoldMs,
   }
 }
 
 function parseApplicationTarget(
   value: unknown,
-  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6,
+  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
 ): ApplicationTarget | null {
   if (!isRecord(value)) return null
   if (value.kind === 'builtin' && typeof value.key === 'string' && value.key) {
@@ -533,7 +561,7 @@ function parseApplicationTarget(
 }
 
 function isLegacyDefaultAssignment(
-  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6,
+  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
   gesture: string,
   applicationId: string | null,
 ) {
@@ -588,4 +616,11 @@ function isValidSteamAppId(value: string) {
   if (!/^\d{1,10}$/.test(value)) return false
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 0xFFFF_FFFF
+}
+
+function isValidGestureHoldMs(value: unknown): value is number {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= MIN_GESTURE_HOLD_MS &&
+    value <= MAX_GESTURE_HOLD_MS
 }

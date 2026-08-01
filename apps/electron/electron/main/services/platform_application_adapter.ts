@@ -223,6 +223,7 @@ export async function buildSettingsView(
     applications,
     gestureAssignments: { ...settings.gestureAssignments },
     inputSequenceAssignments: structuredClone(settings.inputSequenceAssignments),
+    gestureHoldMs: settings.gestureHoldMs,
     platform: process.platform,
     supportsCustomApplications: process.platform === 'win32',
     ...(recoveryNotice ? { recoveryNotice } : {}),

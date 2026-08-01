@@ -806,6 +806,21 @@ ipcMain.handle('settings:get', async () => {
   }
 })
 
+ipcMain.handle('settings:set-gesture-hold-ms', async (_event, payload) => {
+  if (!isRecord(payload) || typeof payload.gestureHoldMs !== 'number') {
+    return { success: false, error: 'INVALID_BODY', message: '유지 시간이 올바르지 않습니다.' }
+  }
+
+  try {
+    const settings = await getApplicationSettingsStore().setGestureHoldMs(
+      payload.gestureHoldMs,
+    )
+    return { success: true, settings: await buildSettingsView(settings) }
+  } catch (error) {
+    return toSettingsError(error)
+  }
+})
+
 ipcMain.handle('application:discover', async (_event, payload) => {
   const forceRefresh = isRecord(payload) && payload.forceRefresh === true
   try {
@@ -1203,6 +1218,7 @@ function toSettingsError(error: unknown) {
     INVALID_APPLICATION_NAME: '프로그램 이름을 입력하세요.',
     APPLICATION_ALREADY_REGISTERED: '이미 등록된 프로그램입니다.',
     INVALID_INPUT_SEQUENCE: '키 입력 또는 대기 시간을 확인하세요.',
+    INVALID_GESTURE_HOLD_MS: '유지 시간은 80~2,000ms 사이로 입력하세요.',
   }
   return {
     success: false,

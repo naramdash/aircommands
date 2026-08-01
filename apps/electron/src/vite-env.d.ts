@@ -17,6 +17,9 @@ interface Window {
       clientRequestId?: unknown
     }): Promise<OpenAppResponse>
     getSettings(): Promise<SettingsResponse>
+    setGestureHoldMs(payload: {
+      gestureHoldMs: number
+    }): Promise<SettingsMutationResponse>
     discoverApplications(payload?: {
       forceRefresh?: boolean
     }): Promise<ApplicationDiscoveryResponse>
@@ -147,6 +150,7 @@ type UserSettingsView = {
   applications: ApplicationSummary[]
   gestureAssignments: Record<string, string | null>
   inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
+  gestureHoldMs: number
   platform: string
   supportsCustomApplications: boolean
   recoveryNotice?: string

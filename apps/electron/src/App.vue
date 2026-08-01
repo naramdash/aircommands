@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ApplicationPickerDialog from './components/ApplicationPickerDialog.vue'
+import GestureHoldDialog from './components/GestureHoldDialog.vue'
 import WebLoginDialog from './components/WebLoginDialog.vue'
 import {
   oneHandTouchGestureCommands,
@@ -9,6 +10,7 @@ import {
 import {
   createRecognitionContext,
   reduceRecognitionFrame,
+  TOUCH_HOLD_MS,
 } from './utils/gesture_command_detection/recognition_reducer'
 import { getTouchFrame } from './utils/gesture_command_detection/touch_detection'
 import type {
@@ -57,9 +59,13 @@ const gestureCompletionNotice = ref('')
 const settings = ref<UserSettingsView | null>(null)
 const applicationPickerGesture = ref<GestureName | null>(null)
 const isWebLoginDialogOpen = ref(false)
+const isGestureHoldDialogOpen = ref(false)
 const isClearingAssignments = ref(false)
 const isEditingCommands = computed(() =>
-  Boolean(applicationPickerGesture.value) || isWebLoginDialogOpen.value)
+  Boolean(applicationPickerGesture.value) ||
+  isWebLoginDialogOpen.value ||
+  isGestureHoldDialogOpen.value)
+const gestureHoldMs = computed(() => settings.value?.gestureHoldMs ?? TOUCH_HOLD_MS)
 const hasGestureAssignments = computed(() =>
   Object.keys(settings.value?.gestureAssignments ?? {}).some((gesture) =>
     settings.value?.gestureAssignments[gesture] !== null ||
@@ -313,7 +319,12 @@ function drawCameraFrame() {
     const now = performance.now()
     const result = handLandmarker.detectForVideo(video, now)
     const touchFrame = getTouchFrame(result.landmarks, result.handednesses, now)
-    const recognitionResult = reduceRecognitionFrame(recognitionContext, touchFrame, now)
+    const recognitionResult = reduceRecognitionFrame(
+      recognitionContext,
+      touchFrame,
+      now,
+      gestureHoldMs.value,
+    )
 
     const activeContact = recognitionResult.context.activeTouch ?? touchFrame.closestContact
     const successContact = getSuccessTouchContact(recognitionResult.executionCandidate ? activeContact : null, now)
@@ -768,8 +779,18 @@ onBeforeUnmount(() => {
             <div class="status-label">실행 후보</div>
             <div class="status-value">{{ currentCandidateLabel }}</div>
           </div>
-          <div class="status-item">
-            <div class="status-label">유지</div>
+          <div
+            class="status-item configurable"
+            role="button"
+            tabindex="0"
+            :title="`제스처 유지 시간 설정 · 현재 ${gestureHoldMs}ms`"
+            @click="isGestureHoldDialogOpen = true"
+            @keydown.enter="isGestureHoldDialogOpen = true"
+            @keydown.space.prevent="isGestureHoldDialogOpen = true">
+            <div class="status-label">
+              <span>유지</span>
+              <span class="status-setting">{{ gestureHoldMs }}ms</span>
+            </div>
             <div class="status-inline">
               <div class="status-value">{{ touchProgressPercent }}%</div>
               <div class="status-progress" role="progressbar" aria-label="유지 진행도" :aria-valuenow="touchProgressPercent" aria-valuemin="0" aria-valuemax="100">
@@ -881,6 +902,13 @@ onBeforeUnmount(() => {
     <WebLoginDialog
       v-if="isWebLoginDialogOpen"
       @close="isWebLoginDialogOpen = false" />
+
+    <GestureHoldDialog
+      v-if="isGestureHoldDialogOpen"
+      :gesture-hold-ms="gestureHoldMs"
+      @close="isGestureHoldDialogOpen = false"
+      @update="updateSettings"
+      @status="handleSettingsStatus" />
   </main>
 </template>
 
@@ -968,6 +996,30 @@ onBeforeUnmount(() => {
 
 .status-item:last-child {
   border-right: 0;
+}
+
+.status-item.configurable {
+  cursor: pointer;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.status-item.configurable:hover,
+.status-item.configurable:focus-visible {
+  outline: none;
+  background: rgba(56, 189, 248, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.55);
+}
+
+.status-item.configurable .status-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.status-setting {
+  color: #7dd3fc;
+  font-size: 10px;
+  text-transform: none;
 }
 
 .status-label {

@@ -43,6 +43,9 @@ contextBridge.exposeInMainWorld('aircommands', {
   getSettings() {
     return ipcRenderer.invoke('settings:get')
   },
+  setGestureHoldMs(payload: { gestureHoldMs: number }) {
+    return ipcRenderer.invoke('settings:set-gesture-hold-ms', payload)
+  },
   discoverApplications(payload: { forceRefresh?: boolean } = {}) {
     return ipcRenderer.invoke('application:discover', payload)
   },

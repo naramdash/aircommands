@@ -22,6 +22,7 @@
 5. IPC endpoints:
    - `app:open`
    - `settings:get`
+   - `settings:set-gesture-hold-ms`
    - `application:discover`
    - `application:add-discovered`
    - `application:assign-discovered`
@@ -63,6 +64,7 @@
 
 - `window.aircommands.openApp(...)`: requests a registered application launch by ID
 - `window.aircommands.getSettings()`: loads registered targets and gesture assignments
+- `window.aircommands.setGestureHoldMs(...)`: validates and persists the touch hold duration
 - `window.aircommands.discoverApplications(...)`: searches Windows Start apps,
   shortcuts, and locally installed Steam games
 - `window.aircommands.addDiscoveredApplication(...)`: registers a cached discovery item
@@ -92,9 +94,9 @@
   Catalog v2 persists validated, size-bounded icon data so the first picker opened
   after a restart can render icons without waiting for Windows discovery.
 - v1 path-only, v2 AppUserModelID, v3 one-hand, and v4 unassigned-default
-  settings migrate to v6 automatically. v4 removes the retired two-hand
+  settings migrate to v7 automatically. v4 removes the retired two-hand
   assignments and seeded one-hand defaults; v5 adds Steam App ID targets; v6
-  adds per-gesture keyboard input sequences.
+  adds per-gesture keyboard input sequences; v7 adds the gesture hold duration.
 - The first run keeps the legacy built-in registry for launch compatibility, but
   all six gesture assignments start unassigned.
 - During migration, assignments that still exactly match a former seeded default
@@ -132,6 +134,15 @@
 - The renderer sends only the gesture identifier when executing. The main process
   loads the persisted sequence, revalidates it, and generates the native input
   command without accepting raw PowerShell or arbitrary script text from the UI.
+
+## Gesture hold duration
+
+- The default touch hold duration is 280ms and the supported range is 80–2,000ms.
+- The existing `유지` status cell displays the saved duration and opens the settings
+  dialog on click, Enter, or Space; no separate settings card is added to the page.
+- Saving updates `userData/config/settings.json`, and subsequent recognition frames
+  use the new duration for both progress percentage and execution timing.
+- Recognition execution pauses while the hold-duration dialog is open.
 
 ## Icon Strategy (Current)
 
