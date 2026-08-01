@@ -33,6 +33,8 @@
    - `application:remove`
    - `application:test`
    - `gesture:assign`
+   - `gesture:assign-input-sequence`
+   - `input-sequence:execute`
    - `gesture:clear-all`
    - `app:notify-gesture`
    - `browser:close`
@@ -72,7 +74,11 @@
 - `window.aircommands.replaceApplicationTarget(...)`: replaces a target through a native picker
 - `window.aircommands.removeApplication(...)`: removes an app and clears its assignments
 - `window.aircommands.assignGesture(...)`: persists one gesture assignment
-- `window.aircommands.clearGestureAssignments()`: clears all six assignments
+- `window.aircommands.assignInputSequence(...)`: replaces a gesture's program assignment
+  with a validated key/delay sequence
+- `window.aircommands.executeInputSequence(...)`: executes the sequence already stored
+  for a gesture; the renderer cannot submit arbitrary execution steps
+- `window.aircommands.clearGestureAssignments()`: clears all configurable assignments
   after confirmation without deleting registered applications
 - `window.aircommands.testApplication(...)`: tests a registered launch target
 - `window.aircommands.notifyGesture(...)`: emits success/failure toast event
@@ -86,13 +92,16 @@
   Catalog v2 persists validated, size-bounded icon data so the first picker opened
   after a restart can render icons without waiting for Windows discovery.
 - v1 path-only, v2 AppUserModelID, v3 one-hand, and v4 unassigned-default
-  settings migrate to v5 automatically. v4 removes the retired two-hand
-  assignments and seeded one-hand defaults; v5 adds Steam App ID targets.
+  settings migrate to v6 automatically. v4 removes the retired two-hand
+  assignments and seeded one-hand defaults; v5 adds Steam App ID targets; v6
+  adds per-gesture keyboard input sequences.
 - The first run keeps the legacy built-in registry for launch compatibility, but
   all six gesture assignments start unassigned.
 - During migration, assignments that still exactly match a former seeded default
   are cleared. Assignments changed by the user are preserved.
-- All six one-hand gestures can be assigned independently or left unassigned.
+- The five configurable one-hand gestures can independently launch a program,
+  run an input sequence, or remain unassigned. The left thumb + ring gesture
+  remains reserved for configured Google web login.
 - Windows selection searches `Get-StartApps` and user/all-user Start Menu shortcuts.
   The picker reads the in-memory copy immediately, receives background startup
   updates, and lets users force a refresh.
@@ -108,6 +117,21 @@
   cannot provide a raw command or executable path to the launch endpoint.
 - Custom target selection is Windows-only in v1. Built-in applications continue to
   use the existing platform command fallbacks on macOS and Linux.
+
+## Keyboard input sequences
+
+- The gesture action dialog has separate `프로그램` and `입력 시퀀스` categories.
+- A sequence contains key/chord steps and delay steps. For example, `P`, `300ms`,
+  `Enter` is stored and executed in that order. Ctrl, Alt, Shift, Win, letters,
+  digits, navigation keys, function keys, and common punctuation keys are supported.
+- Program and input-sequence assignments are mutually exclusive for each gesture.
+  Choosing one clears the other without deleting registered applications.
+- Sequence execution is Windows-only and uses validated virtual-key codes through
+  the Windows `SendInput` API. Input goes to the application that is active when
+  the gesture executes and cannot cross a higher-integrity/UAC boundary.
+- The renderer sends only the gesture identifier when executing. The main process
+  loads the persisted sequence, revalidates it, and generates the native input
+  command without accepting raw PowerShell or arbitrary script text from the UI.
 
 ## Icon Strategy (Current)
 
@@ -144,9 +168,9 @@ Removed as unused in current code path:
 - First close-to-tray can show informational notification
 - If tray is unavailable, close event is not forcibly converted to hide
 - Build pipeline includes electron-builder packaging
-- Gesture execution pauses while an application picker is open.
-- Clicking a gesture cell opens the searchable application picker directly; there
-  is no separate program-library or command-editor screen.
+- Gesture execution pauses while a gesture action dialog is open.
+- Clicking a configurable gesture cell opens the action dialog, where the user
+  chooses either the searchable program picker or the input-sequence editor.
 - On Windows, the picker does not expose the legacy 21-item built-in registry as
   an available-app list. It shows Windows discovery results plus targets the user
   selected directly; a legacy built-in remains visible only as the current

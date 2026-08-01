@@ -17,6 +17,8 @@ import {
   configureApplicationSettingsStore,
   getApplicationSettingsStore,
 } from './services/application_settings'
+import { formatInputSequence } from './services/input_sequence'
+import { executeWindowsInputSequence } from './services/windows_input_sequence'
 import {
   buildSettingsView,
   pickWindowsApplication,
@@ -81,6 +83,7 @@ let browserWindow: BrowserWindow | null = null
 let browserPopupGeneration = 0
 let tray: Tray | null = null
 let isQuitting = false
+let isInputSequenceExecuting = false
 let gestureNotificationsEnabled = true
 let trayBackgroundNoticeShown = false
 const preload = path.join(__dirname, '../preload/index.mjs')
@@ -1069,11 +1072,70 @@ ipcMain.handle('gesture:assign', async (_event, payload) => {
   }
 })
 
+ipcMain.handle('gesture:assign-input-sequence', async (_event, payload) => {
+  if (
+    !isRecord(payload) ||
+    typeof payload.gesture !== 'string' ||
+    !Array.isArray(payload.steps)
+  ) {
+    return { success: false, error: 'INVALID_BODY', message: '입력 시퀀스 정보가 올바르지 않습니다.' }
+  }
+
+  try {
+    const settings = await getApplicationSettingsStore().assignInputSequence(
+      payload.gesture,
+      payload.steps,
+    )
+    return { success: true, settings: await buildSettingsView(settings) }
+  } catch (error) {
+    return toSettingsError(error)
+  }
+})
+
+ipcMain.handle('input-sequence:execute', async (_event, payload) => {
+  if (!isRecord(payload) || typeof payload.gesture !== 'string') {
+    return { success: false, error: 'INVALID_BODY', message: '제스처 정보가 올바르지 않습니다.' }
+  }
+  if (isInputSequenceExecuting) {
+    return {
+      success: false,
+      error: 'INPUT_SEQUENCE_BUSY',
+      message: '다른 입력 시퀀스를 실행 중입니다.',
+    }
+  }
+
+  const settings = await getApplicationSettingsStore().getSettings()
+  const steps = settings.inputSequenceAssignments[payload.gesture]
+  if (!steps) {
+    return {
+      success: false,
+      error: 'INPUT_SEQUENCE_NOT_FOUND',
+      message: '이 제스처에 저장된 입력 시퀀스가 없습니다.',
+    }
+  }
+
+  isInputSequenceExecuting = true
+  try {
+    await executeWindowsInputSequence(steps)
+    return {
+      success: true,
+      label: formatInputSequence(steps),
+      message: '입력 시퀀스를 실행했습니다.',
+    }
+  } catch (error) {
+    return toInputSequenceError(error)
+  } finally {
+    isInputSequenceExecuting = false
+  }
+})
+
 ipcMain.handle('gesture:clear-all', async () => {
   const store = getApplicationSettingsStore()
   const currentSettings = await store.getSettings()
-  const assignmentCount = Object.values(currentSettings.gestureAssignments)
-    .filter((applicationId) => applicationId !== null).length
+  const assignmentCount = Object.keys(currentSettings.gestureAssignments)
+    .filter((gesture) =>
+      currentSettings.gestureAssignments[gesture] !== null ||
+      currentSettings.inputSequenceAssignments[gesture] !== null).length
 
   if (assignmentCount === 0) {
     return {
@@ -1087,8 +1149,8 @@ ipcMain.handle('gesture:clear-all', async () => {
   const confirmation = await dialog.showMessageBox(win ?? undefined, {
     type: 'warning',
     title: '모든 제스처 배정 해제',
-    message: '모든 제스처의 프로그램 배정을 해제하시겠습니까?',
-    detail: `한손 제스처 ${assignmentCount}개의 배정만 비워집니다. 저장된 프로그램 목록은 유지됩니다.`,
+    message: '모든 제스처의 실행 동작을 해제하시겠습니까?',
+    detail: `한손 제스처 ${assignmentCount}개의 프로그램 및 입력 시퀀스 배정만 비워집니다. 저장된 프로그램 목록은 유지됩니다.`,
     buttons: ['모두 비우기', '취소'],
     defaultId: 1,
     cancelId: 1,
@@ -1140,11 +1202,26 @@ function toSettingsError(error: unknown) {
     GESTURE_NOT_FOUND: '제스처를 찾을 수 없습니다.',
     INVALID_APPLICATION_NAME: '프로그램 이름을 입력하세요.',
     APPLICATION_ALREADY_REGISTERED: '이미 등록된 프로그램입니다.',
+    INVALID_INPUT_SEQUENCE: '키 입력 또는 대기 시간을 확인하세요.',
   }
   return {
     success: false,
     error: code,
     message: messages[code] ?? '설정을 저장하지 못했습니다.',
+  }
+}
+
+function toInputSequenceError(error: unknown) {
+  const code = error instanceof Error ? error.message : 'INPUT_SEQUENCE_EXECUTION_FAILED'
+  const messages: Record<string, string> = {
+    INVALID_INPUT_SEQUENCE: '입력 시퀀스 설정이 올바르지 않습니다.',
+    UNSUPPORTED_INPUT_PLATFORM: '입력 시퀀스는 현재 Windows에서만 실행할 수 있습니다.',
+    INPUT_SEQUENCE_EXECUTION_FAILED: 'Windows에 키 입력을 전달하지 못했습니다.',
+  }
+  return {
+    success: false,
+    error: code,
+    message: messages[code] ?? '입력 시퀀스를 실행하지 못했습니다.',
   }
 }
 

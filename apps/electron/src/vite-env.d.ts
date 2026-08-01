@@ -59,6 +59,13 @@ interface Window {
       gesture: string
       applicationId: string | null
     }): Promise<SettingsMutationResponse>
+    assignInputSequence(payload: {
+      gesture: string
+      steps: InputSequenceStep[]
+    }): Promise<SettingsMutationResponse>
+    executeInputSequence(payload: {
+      gesture: string
+    }): Promise<InputSequenceExecutionResponse>
     clearGestureAssignments(): Promise<SettingsMutationResponse & {
       canceled?: boolean
       clearedAssignments?: number
@@ -139,6 +146,7 @@ type ApplicationDiscoveryResponse =
 type UserSettingsView = {
   applications: ApplicationSummary[]
   gestureAssignments: Record<string, string | null>
+  inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
   platform: string
   supportsCustomApplications: boolean
   recoveryNotice?: string
@@ -150,6 +158,30 @@ type SettingsResponse =
 
 type SettingsMutationResponse =
   | { success: true, settings?: UserSettingsView }
+  | { success: false, error: string, message: string }
+
+type InputKey =
+  | 'CONTROL'
+  | 'ALT'
+  | 'SHIFT'
+  | 'META'
+  | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M'
+  | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z'
+  | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+  | 'ENTER' | 'SPACE' | 'TAB' | 'ESCAPE' | 'BACKSPACE' | 'DELETE' | 'INSERT'
+  | 'HOME' | 'END' | 'PAGE_UP' | 'PAGE_DOWN'
+  | 'ARROW_UP' | 'ARROW_DOWN' | 'ARROW_LEFT' | 'ARROW_RIGHT'
+  | 'F1' | 'F2' | 'F3' | 'F4' | 'F5' | 'F6'
+  | 'F7' | 'F8' | 'F9' | 'F10' | 'F11' | 'F12'
+  | 'BACKQUOTE' | 'MINUS' | 'EQUAL' | 'BRACKET_LEFT' | 'BRACKET_RIGHT'
+  | 'BACKSLASH' | 'SEMICOLON' | 'QUOTE' | 'COMMA' | 'PERIOD' | 'SLASH'
+
+type InputSequenceStep =
+  | { type: 'keys', keys: InputKey[] }
+  | { type: 'delay', durationMs: number }
+
+type InputSequenceExecutionResponse =
+  | { success: true, label: string, message: string }
   | { success: false, error: string, message: string }
 
 type BrowserStatus = {

@@ -25,10 +25,12 @@ describe('ApplicationSettingsStore', () => {
 
     const settings = await store.getSettings()
 
-    expect(settings.version).toBe(5)
+    expect(settings.version).toBe(6)
     expect(settings.applications).toHaveLength(21)
     expect(Object.keys(settings.gestureAssignments)).toHaveLength(6)
     expect(Object.values(settings.gestureAssignments).every((assignment) =>
+      assignment === null)).toBe(true)
+    expect(Object.values(settings.inputSequenceAssignments).every((assignment) =>
       assignment === null)).toBe(true)
     expect(JSON.parse(await readFile(settingsPath, 'utf8'))).toEqual(settings)
   })
@@ -65,7 +67,11 @@ describe('ApplicationSettingsStore', () => {
     const store = new ApplicationSettingsStore(settingsPath)
     const initial = await store.getSettings()
     await store.assignGesture(ALL_GESTURE_NAMES[0], 'builtin:chrome')
-    await store.assignGesture(ALL_GESTURE_NAMES[1], 'builtin:notepad')
+    await store.assignInputSequence(ALL_GESTURE_NAMES[1], [
+      { type: 'keys', keys: ['P'] },
+      { type: 'delay', durationMs: 300 },
+      { type: 'keys', keys: ['ENTER'] },
+    ])
 
     const result = await store.clearGestureAssignments()
     const reloaded = await new ApplicationSettingsStore(settingsPath).getSettings()
@@ -74,7 +80,49 @@ describe('ApplicationSettingsStore', () => {
     expect(result.settings.applications).toEqual(initial.applications)
     expect(Object.values(result.settings.gestureAssignments).every((assignment) =>
       assignment === null)).toBe(true)
+    expect(Object.values(result.settings.inputSequenceAssignments).every((assignment) =>
+      assignment === null)).toBe(true)
     expect(reloaded).toEqual(result.settings)
+  })
+
+  it('persists input sequences and keeps program and sequence assignments exclusive', async () => {
+    const settingsPath = await createSettingsPath()
+    const gesture = ALL_GESTURE_NAMES[0]
+    const store = new ApplicationSettingsStore(settingsPath)
+    await store.getSettings()
+
+    const withSequence = await store.assignInputSequence(gesture, [
+      { type: 'keys', keys: ['CONTROL', 'P'] },
+      { type: 'delay', durationMs: 300 },
+      { type: 'keys', keys: ['ENTER'] },
+    ])
+
+    expect(withSequence.gestureAssignments[gesture]).toBeNull()
+    expect(withSequence.inputSequenceAssignments[gesture]).toEqual([
+      { type: 'keys', keys: ['CONTROL', 'P'] },
+      { type: 'delay', durationMs: 300 },
+      { type: 'keys', keys: ['ENTER'] },
+    ])
+
+    const withApplication = await store.assignGesture(gesture, 'builtin:notepad')
+    const reloaded = await new ApplicationSettingsStore(settingsPath).getSettings()
+
+    expect(withApplication.gestureAssignments[gesture]).toBe('builtin:notepad')
+    expect(withApplication.inputSequenceAssignments[gesture]).toBeNull()
+    expect(reloaded).toEqual(withApplication)
+  })
+
+  it('rejects invalid input sequences without changing the saved assignment', async () => {
+    const settingsPath = await createSettingsPath()
+    const gesture = ALL_GESTURE_NAMES[0]
+    const store = new ApplicationSettingsStore(settingsPath)
+    await store.getSettings()
+
+    await expect(store.assignInputSequence(gesture, [
+      { type: 'delay', durationMs: 0 },
+    ])).rejects.toThrow('INVALID_INPUT_SEQUENCE')
+
+    expect((await store.getSettings()).inputSequenceAssignments[gesture]).toBeNull()
   })
 
   it('deduplicates discovered targets and registers plus assigns atomically', async () => {
@@ -134,14 +182,14 @@ describe('ApplicationSettingsStore', () => {
     const migrated = await new ApplicationSettingsStore(settingsPath).getSettings()
     const persisted = JSON.parse(await readFile(settingsPath, 'utf8'))
 
-    expect(migrated.version).toBe(5)
+    expect(migrated.version).toBe(6)
     expect(migrated.gestureAssignments).not.toHaveProperty('touch_left_index_right_index')
     expect(persisted).toEqual(migrated)
   })
 })
 
 describe('migrateSettings', () => {
-  it('migrates v1 settings to v5 without changing custom one-hand assignments', () => {
+  it('migrates v1 settings to v6 without changing custom one-hand assignments', () => {
     const current = createDefaultSettings()
     const legacy = {
       ...current,
@@ -154,7 +202,7 @@ describe('migrateSettings', () => {
 
     const migrated = migrateSettings(legacy)
 
-    expect(migrated?.version).toBe(5)
+    expect(migrated?.version).toBe(6)
     expect(migrated?.applications).toEqual(current.applications)
     expect(migrated?.gestureAssignments).toEqual({
       ...current.gestureAssignments,
@@ -181,7 +229,7 @@ describe('migrateSettings', () => {
     })
   })
 
-  it('migrates v4 settings to v5 without changing user assignments', () => {
+  it('migrates v4 settings to v6 without changing user assignments', () => {
     const current = createDefaultSettings()
     const versionFourSettings = {
       ...current,
@@ -194,7 +242,7 @@ describe('migrateSettings', () => {
 
     expect(migrateSettings(versionFourSettings)).toEqual({
       ...versionFourSettings,
-      version: 5,
+      version: 6,
     })
   })
 
@@ -217,7 +265,7 @@ describe('migrateSettings', () => {
     expect(first.created).toBe(true)
     expect(second.created).toBe(false)
     expect(second.applicationId).toBe(first.applicationId)
-    expect(reloaded.version).toBe(5)
+    expect(reloaded.version).toBe(6)
     expect(reloaded.applications.filter((application) =>
       application.target.kind === 'steam-app')).toEqual([
       expect.objectContaining({
@@ -277,8 +325,31 @@ describe('migrateSettings', () => {
     expect(migrateSettings(settings)?.gestureAssignments[gesture]).toBeNull()
   })
 
+  it('preserves valid v6 input sequences and drops invalid ones', () => {
+    const settings = createDefaultSettings()
+    const validGesture = ALL_GESTURE_NAMES[0]
+    const invalidGesture = ALL_GESTURE_NAMES[1]
+    settings.inputSequenceAssignments[validGesture] = [
+      { type: 'keys', keys: ['SHIFT', 'P'] },
+      { type: 'delay', durationMs: 300 },
+      { type: 'keys', keys: ['ENTER'] },
+    ]
+    settings.gestureAssignments[validGesture] = 'builtin:chrome'
+    settings.inputSequenceAssignments[invalidGesture] = [
+      { type: 'delay', durationMs: 0 },
+    ]
+
+    const migrated = migrateSettings(settings)
+
+    expect(migrated?.inputSequenceAssignments[validGesture]).toEqual(
+      settings.inputSequenceAssignments[validGesture],
+    )
+    expect(migrated?.gestureAssignments[validGesture]).toBeNull()
+    expect(migrated?.inputSequenceAssignments[invalidGesture]).toBeNull()
+  })
+
   it('rejects unknown settings versions', () => {
-    expect(migrateSettings({ version: 6 })).toBeNull()
+    expect(migrateSettings({ version: 7 })).toBeNull()
   })
 })
 

@@ -21,6 +21,7 @@ import type {
   TouchFrame,
 } from './utils/gesture_command_detection/types'
 import { handLandmarker } from './utils/hand_landmark_detection'
+import { formatInputSequence } from './utils/input_sequence'
 
 const FINGER_RADIUS = 5
 const ACTIVE_FINGER_RADIUS = 8
@@ -60,8 +61,9 @@ const isClearingAssignments = ref(false)
 const isEditingCommands = computed(() =>
   Boolean(applicationPickerGesture.value) || isWebLoginDialogOpen.value)
 const hasGestureAssignments = computed(() =>
-  Object.values(settings.value?.gestureAssignments ?? {})
-    .some((applicationId) => applicationId !== null))
+  Object.keys(settings.value?.gestureAssignments ?? {}).some((gesture) =>
+    settings.value?.gestureAssignments[gesture] !== null ||
+    settings.value?.inputSequenceAssignments[gesture] !== null))
 const isRecognitionOnHold = computed(() => Boolean(poseWarning.value))
 const oneHandGestureGroups = computed(() => [
   {
@@ -101,7 +103,7 @@ const activeTouchApplicationIcon = computed(() => {
 const cooldownSeconds = computed(() => Math.ceil(cooldownRemainingMs.value / 1000))
 
 const trackingStatus = computed(() => {
-  if (isEditingCommands.value) return '프로그램 선택 중'
+  if (isEditingCommands.value) return '제스처 동작 설정 중'
   if (!isCameraActive.value) return '카메라 대기'
   if (recognitionState.value === 'executing') return '실행 중'
   if (recognitionState.value === 'cooldown') return '쿨다운'
@@ -115,7 +117,7 @@ const trackingStatus = computed(() => {
 })
 
 const phaseGuideText = computed(() => {
-  if (isEditingCommands.value) return '프로그램 선택 중에는 제스처 실행이 일시 정지됩니다'
+  if (isEditingCommands.value) return '제스처 동작 설정 중에는 실행이 일시 정지됩니다'
   if (!isCameraActive.value) return '카메라를 시작하세요'
   if (!isLeftHandVisible.value && !isRightHandVisible.value) return '손을 화면에 보여주세요'
   if (poseWarning.value) return poseWarning.value
@@ -136,21 +138,29 @@ function getApplicationForGesture(gesture: GestureName) {
   return settings.value?.applications.find((application) => application.id === applicationId) ?? null
 }
 
+function getInputSequenceForGesture(gesture: GestureName) {
+  return settings.value?.inputSequenceAssignments[gesture] ?? null
+}
+
 function isWebLoginGesture(gesture: GestureName) {
   return gesture === WEB_LOGIN_GESTURE
 }
 
 function getGestureApplicationLabel(gesture: GestureName) {
   if (isWebLoginGesture(gesture)) return 'Google 웹 로그인'
+  const inputSequence = getInputSequenceForGesture(gesture)
+  if (inputSequence) return formatInputSequence(inputSequence)
   return getApplicationForGesture(gesture)?.name ?? '미지정'
 }
 
 function getGestureApplicationIcon(gesture: GestureName) {
   if (isWebLoginGesture(gesture)) return '🔐'
+  if (getInputSequenceForGesture(gesture)) return '⌨️'
   return getApplicationForGesture(gesture)?.iconText ?? '➖'
 }
 
 function getGestureApplicationIconDataUrl(gesture: GestureName) {
+  if (getInputSequenceForGesture(gesture)) return undefined
   return getApplicationForGesture(gesture)?.iconDataUrl
 }
 
@@ -609,13 +619,53 @@ async function executeCandidate(candidate: GestureCandidate) {
     return
   }
 
+  const inputSequence = settings.value?.inputSequenceAssignments[candidate.gesture]
+  if (inputSequence) {
+    const sequenceLabel = formatInputSequence(inputSequence)
+    const actionLabel = `입력 시퀀스 ${sequenceLabel}`
+    commandResultMessage.value = `${actionLabel} 실행 중`
+    try {
+      const response = await window.aircommands.executeInputSequence({
+        gesture: candidate.gesture,
+      })
+      if (response.success) {
+        commandResultMessage.value = `${actionLabel} 완료`
+        await notifyGestureResult({
+          status: 'success',
+          gestureLabel: candidate.gestureLabel,
+          appLabel: actionLabel,
+        })
+      } else {
+        commandResultMessage.value = `${actionLabel} 실패`
+        errorMessage.value = response.message
+        await notifyGestureResult({
+          status: 'failure',
+          gestureLabel: candidate.gestureLabel,
+          appLabel: actionLabel,
+          message: response.message,
+        })
+      }
+    } catch (error) {
+      commandResultMessage.value = `${actionLabel} 실패`
+      const message = error instanceof Error ? error.message : '입력 시퀀스를 실행하지 못했습니다.'
+      errorMessage.value = message
+      await notifyGestureResult({
+        status: 'failure',
+        gestureLabel: candidate.gestureLabel,
+        appLabel: actionLabel,
+        message,
+      })
+    }
+    return
+  }
+
   const applicationId = settings.value?.gestureAssignments[candidate.gesture]
   const application = applicationId
     ? settings.value?.applications.find((item) => item.id === applicationId)
     : null
   if (!applicationId || !application) {
     commandResultMessage.value = `${candidate.gestureLabel} 미배정`
-    errorMessage.value = '이 제스처에 프로그램이 배정되지 않았습니다.'
+    errorMessage.value = '이 제스처에 실행 동작이 배정되지 않았습니다.'
     return
   }
 
@@ -800,7 +850,7 @@ onBeforeUnmount(() => {
       <button v-else type="button" class="secondary" @click="stopCamera">정지</button>
 
       <span v-if="activeTouchCommand" class="pill">
-        현재 앱:
+        현재 동작:
         <img
           v-if="activeTouchApplication?.iconDataUrl"
           :src="activeTouchApplication.iconDataUrl"

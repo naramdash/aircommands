@@ -4,6 +4,7 @@ import {
   filterAndSortApplications,
   filterSelectableRegisteredApplications,
 } from '../utils/application_search'
+import InputSequenceEditor from './InputSequenceEditor.vue'
 
 const props = defineProps<{
   settings: UserSettingsView
@@ -26,6 +27,11 @@ const discoveryWarning = ref('')
 const isEditingName = ref(false)
 const isReplacingCurrent = ref(false)
 const editingName = ref('')
+const selectedCategory = ref<'application' | 'input-sequence'>(
+  props.gesture && props.settings.inputSequenceAssignments[props.gesture]
+    ? 'input-sequence'
+    : 'application',
+)
 let removeCatalogListener: (() => void) | null = null
 
 const mode = computed(() => {
@@ -36,12 +42,19 @@ const mode = computed(() => {
 
 const title = computed(() => {
   if (mode.value === 'replace') return '실행 대상 교체'
-  if (mode.value === 'assign') return '제스처 프로그램 선택'
+  if (mode.value === 'assign') return '제스처 동작 선택'
   return '프로그램 추가'
 })
 
+const description = computed(() => mode.value === 'assign'
+  ? '프로그램 실행 또는 키 입력 시퀀스를 이 제스처에 배정합니다.'
+  : '프로그램을 고르면 설정이 바로 저장됩니다.')
+
 const currentApplicationId = computed(() =>
   props.gesture ? props.settings.gestureAssignments[props.gesture] : null)
+
+const currentInputSequence = computed(() =>
+  props.gesture ? props.settings.inputSequenceAssignments[props.gesture] : null)
 
 const currentApplication = computed(() => {
   const applicationId = props.replaceApplicationId ?? currentApplicationId.value
@@ -284,12 +297,31 @@ function getErrorMessage(error: unknown) {
       <header class="picker-header">
         <div>
           <h2 id="picker-title">{{ title }}</h2>
-          <p>프로그램을 고르면 이 제스처의 설정이 바로 저장됩니다.</p>
+          <p>{{ description }}</p>
         </div>
         <button type="button" class="icon-button" aria-label="닫기" @click="emit('close')">×</button>
       </header>
 
-      <section v-if="currentApplication && gesture" class="current-application">
+      <nav v-if="mode === 'assign'" class="category-tabs" aria-label="제스처 실행 유형">
+        <button
+          type="button"
+          :class="{ active: selectedCategory === 'application' }"
+          @click="selectedCategory = 'application'">
+          <span>🧩</span>
+          프로그램
+        </button>
+        <button
+          type="button"
+          :class="{ active: selectedCategory === 'input-sequence' }"
+          @click="selectedCategory = 'input-sequence'">
+          <span>⌨️</span>
+          입력 시퀀스
+        </button>
+      </nav>
+
+      <section
+        v-if="selectedCategory === 'application' && currentApplication && gesture"
+        class="current-application">
         <div class="current-identity">
           <img v-if="currentApplication.iconDataUrl" :src="currentApplication.iconDataUrl" alt="">
           <span v-else class="app-emoji">{{ currentApplication.iconText }}</span>
@@ -323,7 +355,7 @@ function getErrorMessage(error: unknown) {
         </div>
       </section>
 
-      <div class="search-row">
+      <div v-if="selectedCategory === 'application'" class="search-row">
         <input
           v-model="query"
           type="search"
@@ -340,7 +372,15 @@ function getErrorMessage(error: unknown) {
       </div>
 
       <div class="picker-content">
-        <section v-if="mode !== 'replace'">
+        <InputSequenceEditor
+          v-if="selectedCategory === 'input-sequence' && gesture"
+          :gesture="gesture"
+          :initial-steps="currentInputSequence"
+          @close="emit('close')"
+          @update="emit('update', $event)"
+          @status="(message, isError) => emit('status', message, isError)" />
+
+        <section v-else-if="mode !== 'replace'">
           <div class="section-title">
             <h3>프로그램 선택</h3>
             <span v-if="isLoading">설치 앱 확인 중…</span>
@@ -352,11 +392,11 @@ function getErrorMessage(error: unknown) {
               v-if="mode === 'assign'"
               type="button"
               class="app-item unassigned"
-              :class="{ selected: !currentApplicationId }"
+              :class="{ selected: !currentApplicationId && !currentInputSequence }"
               :disabled="isMutating"
               @click="clearAssignment">
               <span class="app-emoji">➖</span>
-              <span><strong>미배정</strong><small>이 제스처에서 프로그램을 실행하지 않음</small></span>
+              <span><strong>미배정</strong><small>이 제스처에서 아무 동작도 실행하지 않음</small></span>
             </button>
             <button
               v-for="application in filteredDirectApplications"
@@ -435,7 +475,7 @@ function getErrorMessage(error: unknown) {
         </section>
       </div>
 
-      <footer class="picker-footer">
+      <footer v-if="selectedCategory === 'application'" class="picker-footer">
         <span>목록에 없는 포터블 프로그램은 직접 찾을 수 있습니다.</span>
         <div>
           <button type="button" class="secondary" @click="emit('close')">취소</button>
@@ -468,8 +508,8 @@ function getErrorMessage(error: unknown) {
 .picker-dialog {
   width: min(760px, 100%);
   max-height: calc(100vh - 36px);
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   border: 1px solid rgba(94, 119, 150, 0.58);
   border-radius: 16px;
   background: #0a111c;
@@ -478,6 +518,7 @@ function getErrorMessage(error: unknown) {
 }
 
 .picker-header,
+.category-tabs,
 .search-row,
 .picker-footer,
 .section-title,
@@ -495,6 +536,27 @@ function getErrorMessage(error: unknown) {
   gap: 16px;
   padding: 16px 18px;
   border-bottom: 1px solid rgba(94, 119, 150, 0.35);
+}
+
+.category-tabs {
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(94, 119, 150, 0.28);
+}
+
+.category-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #9eb6d1;
+  background: transparent;
+  border: 1px solid rgba(94, 119, 150, 0.42);
+}
+
+.category-tabs button.active {
+  color: #e7f0fb;
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.13);
 }
 
 .picker-header h2,
@@ -576,6 +638,7 @@ input {
 }
 
 .picker-content {
+  flex: 1 1 auto;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);

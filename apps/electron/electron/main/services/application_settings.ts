@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { AVAILABLE_APPS } from './apps'
+import {
+  normalizeInputSequence,
+  type InputSequenceStep,
+} from './input_sequence'
 
 export type ApplicationTarget =
   | { kind: 'builtin', key: string }
@@ -45,7 +49,14 @@ export type UserConfigV5 = {
   gestureAssignments: Record<string, string | null>
 }
 
-export type UserConfig = UserConfigV5
+export type UserConfigV6 = {
+  version: 6
+  applications: ApplicationRecord[]
+  gestureAssignments: Record<string, string | null>
+  inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
+}
+
+export type UserConfig = UserConfigV6
 
 export type ApplicationSummary = {
   id: string
@@ -59,6 +70,7 @@ export type ApplicationSummary = {
 export type UserSettingsView = {
   applications: ApplicationSummary[]
   gestureAssignments: Record<string, string | null>
+  inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
   platform: NodeJS.Platform
   supportsCustomApplications: boolean
   recoveryNotice?: string
@@ -135,11 +147,15 @@ export function createDefaultSettings(): UserConfig {
   const gestureAssignments = Object.fromEntries(
     ALL_GESTURE_NAMES.map((gesture) => [gesture, null]),
   )
+  const inputSequenceAssignments = Object.fromEntries(
+    ALL_GESTURE_NAMES.map((gesture) => [gesture, null]),
+  )
 
   return {
-    version: 5,
+    version: 6,
     applications,
     gestureAssignments,
+    inputSequenceAssignments,
   }
 }
 
@@ -232,6 +248,7 @@ export class ApplicationSettingsStore {
         })
       }
       draft.gestureAssignments[gesture] = applicationId
+      draft.inputSequenceAssignments[gesture] = null
     })
 
     return { settings, applicationId, created }
@@ -299,6 +316,21 @@ export class ApplicationSettingsStore {
       }
 
       settings.gestureAssignments[gesture] = applicationId
+      settings.inputSequenceAssignments[gesture] = null
+    })
+  }
+
+  async assignInputSequence(
+    gesture: string,
+    steps: InputSequenceStep[],
+  ): Promise<UserConfig> {
+    return this.updateSettings((settings) => {
+      if (!isGestureName(gesture)) throw new Error('GESTURE_NOT_FOUND')
+      const normalized = normalizeInputSequence(steps)
+      if (!normalized) throw new Error('INVALID_INPUT_SEQUENCE')
+
+      settings.gestureAssignments[gesture] = null
+      settings.inputSequenceAssignments[gesture] = normalized
     })
   }
 
@@ -309,8 +341,12 @@ export class ApplicationSettingsStore {
     let clearedAssignments = 0
     const settings = await this.updateSettings((draft) => {
       for (const gesture of ALL_GESTURE_NAMES) {
-        if (draft.gestureAssignments[gesture] !== null) {
+        if (
+          draft.gestureAssignments[gesture] !== null ||
+          draft.inputSequenceAssignments[gesture] !== null
+        ) {
           draft.gestureAssignments[gesture] = null
+          draft.inputSequenceAssignments[gesture] = null
           clearedAssignments += 1
         }
       }
@@ -393,7 +429,8 @@ export function migrateSettings(value: unknown): UserConfig | null {
       value.version !== 2 &&
       value.version !== 3 &&
       value.version !== 4 &&
-      value.version !== 5
+      value.version !== 5 &&
+      value.version !== 6
     )
   ) {
     return null
@@ -433,16 +470,35 @@ export function migrateSettings(value: unknown): UserConfig | null {
     }),
   )
 
+  const inputSequenceAssignments = Object.fromEntries(
+    ALL_GESTURE_NAMES.map((gesture) => {
+      if (value.version < 6 || !isRecord(value.inputSequenceAssignments)) {
+        return [gesture, null]
+      }
+      return [
+        gesture,
+        normalizeInputSequence(value.inputSequenceAssignments[gesture]),
+      ]
+    }),
+  )
+
+  for (const gesture of ALL_GESTURE_NAMES) {
+    if (inputSequenceAssignments[gesture] !== null) {
+      gestureAssignments[gesture] = null
+    }
+  }
+
   return {
-    version: 5,
+    version: 6,
     applications,
     gestureAssignments,
+    inputSequenceAssignments,
   }
 }
 
 function parseApplicationTarget(
   value: unknown,
-  settingsVersion: 1 | 2 | 3 | 4 | 5,
+  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6,
 ): ApplicationTarget | null {
   if (!isRecord(value)) return null
   if (value.kind === 'builtin' && typeof value.key === 'string' && value.key) {
@@ -477,7 +533,7 @@ function parseApplicationTarget(
 }
 
 function isLegacyDefaultAssignment(
-  settingsVersion: 1 | 2 | 3 | 4 | 5,
+  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6,
   gesture: string,
   applicationId: string | null,
 ) {

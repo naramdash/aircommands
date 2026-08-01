@@ -76,6 +76,18 @@ contextBridge.exposeInMainWorld('aircommands', {
   assignGesture(payload: { gesture: string, applicationId: string | null }) {
     return ipcRenderer.invoke('gesture:assign', payload)
   },
+  assignInputSequence(payload: {
+    gesture: string
+    steps: Array<
+      | { type: 'keys'; keys: string[] }
+      | { type: 'delay'; durationMs: number }
+    >
+  }) {
+    return ipcRenderer.invoke('gesture:assign-input-sequence', payload)
+  },
+  executeInputSequence(payload: { gesture: string }) {
+    return ipcRenderer.invoke('input-sequence:execute', payload)
+  },
   clearGestureAssignments() {
     return ipcRenderer.invoke('gesture:clear-all')
   },
