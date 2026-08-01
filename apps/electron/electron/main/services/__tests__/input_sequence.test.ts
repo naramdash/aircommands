@@ -13,15 +13,18 @@ describe('input sequence validation', () => {
     const sequence = normalizeInputSequence([
       { type: 'keys', keys: ['P', 'SHIFT', 'CONTROL'] },
       { type: 'delay', durationMs: 300 },
+      { type: 'scroll', direction: 'down', notches: 3 },
       { type: 'keys', keys: ['ENTER'] },
     ])
 
     expect(sequence).toEqual([
       { type: 'keys', keys: ['CONTROL', 'SHIFT', 'P'] },
       { type: 'delay', durationMs: 300 },
+      { type: 'scroll', direction: 'down', notches: 3 },
       { type: 'keys', keys: ['ENTER'] },
     ])
-    expect(formatInputSequence(sequence!)).toBe('Ctrl + Shift + P → 0.3초 → Enter')
+    expect(formatInputSequence(sequence!))
+      .toBe('Ctrl + Shift + P → 0.3초 → 스크롤 아래 3칸 → Enter')
   })
 
   it('rejects duplicate keys and invalid delays', () => {
@@ -30,6 +33,9 @@ describe('input sequence validation', () => {
     ])).toBeNull()
     expect(normalizeInputSequence([
       { type: 'delay', durationMs: 0 },
+    ])).toBeNull()
+    expect(normalizeInputSequence([
+      { type: 'scroll', direction: 'down', notches: 21 },
     ])).toBeNull()
   })
 })
@@ -41,6 +47,7 @@ describe('Windows input sequence execution', () => {
     await executeWindowsInputSequence([
       { type: 'keys', keys: ['CONTROL', 'P'] },
       { type: 'delay', durationMs: 300 },
+      { type: 'scroll', direction: 'up', notches: 2 },
       { type: 'keys', keys: ['ENTER'] },
     ], {
       platform: 'win32',
@@ -54,6 +61,7 @@ describe('Windows input sequence execution', () => {
     expect(script).toContain('[AircommandsNativeInput]::Key(17, $false, $false)')
     expect(script).toContain('[AircommandsNativeInput]::Key(80, $false, $false)')
     expect(script).toContain('Start-Sleep -Milliseconds 300')
+    expect(script).toContain('[AircommandsNativeInput]::Wheel(240)')
     const controlDownIndex = script.indexOf('Key(17, $false')
     const pDownIndex = script.indexOf('Key(80, $false')
     const pUpIndex = script.indexOf('Key(80, $true')

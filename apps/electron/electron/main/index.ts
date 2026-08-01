@@ -20,6 +20,11 @@ import {
 import { formatInputSequence } from './services/input_sequence'
 import { executeWindowsInputSequence } from './services/windows_input_sequence'
 import {
+  executeWindowsCommand,
+  getWindowsCommandLabel,
+  isWindowsCommand,
+} from './services/windows_command'
+import {
   buildSettingsView,
   pickWindowsApplication,
   validateWindowsApplicationTarget,
@@ -84,6 +89,7 @@ let browserPopupGeneration = 0
 let tray: Tray | null = null
 let isQuitting = false
 let isInputSequenceExecuting = false
+let isWindowsCommandExecuting = false
 let gestureNotificationsEnabled = true
 let trayBackgroundNoticeShown = false
 const preload = path.join(__dirname, '../preload/index.mjs')
@@ -1107,6 +1113,26 @@ ipcMain.handle('gesture:assign-input-sequence', async (_event, payload) => {
   }
 })
 
+ipcMain.handle('gesture:assign-windows-command', async (_event, payload) => {
+  if (
+    !isRecord(payload) ||
+    typeof payload.gesture !== 'string' ||
+    !isWindowsCommand(payload.command)
+  ) {
+    return { success: false, error: 'INVALID_BODY', message: 'Windows 기능 정보가 올바르지 않습니다.' }
+  }
+
+  try {
+    const settings = await getApplicationSettingsStore().assignWindowsCommand(
+      payload.gesture,
+      payload.command,
+    )
+    return { success: true, settings: await buildSettingsView(settings) }
+  } catch (error) {
+    return toSettingsError(error)
+  }
+})
+
 ipcMain.handle('input-sequence:execute', async (_event, payload) => {
   if (!isRecord(payload) || typeof payload.gesture !== 'string') {
     return { success: false, error: 'INVALID_BODY', message: '제스처 정보가 올바르지 않습니다.' }
@@ -1144,13 +1170,51 @@ ipcMain.handle('input-sequence:execute', async (_event, payload) => {
   }
 })
 
+ipcMain.handle('windows-command:execute', async (_event, payload) => {
+  if (!isRecord(payload) || typeof payload.gesture !== 'string') {
+    return { success: false, error: 'INVALID_BODY', message: '제스처 정보가 올바르지 않습니다.' }
+  }
+  if (isWindowsCommandExecuting) {
+    return {
+      success: false,
+      error: 'WINDOWS_COMMAND_BUSY',
+      message: '다른 Windows 기능을 실행 중입니다.',
+    }
+  }
+
+  const settings = await getApplicationSettingsStore().getSettings()
+  const command = settings.windowsCommandAssignments[payload.gesture]
+  if (!command) {
+    return {
+      success: false,
+      error: 'WINDOWS_COMMAND_NOT_FOUND',
+      message: '이 제스처에 저장된 Windows 기능이 없습니다.',
+    }
+  }
+
+  isWindowsCommandExecuting = true
+  try {
+    await executeWindowsCommand(command)
+    return {
+      success: true,
+      label: getWindowsCommandLabel(command),
+      message: 'Windows 기능을 실행했습니다.',
+    }
+  } catch (error) {
+    return toWindowsCommandError(error)
+  } finally {
+    isWindowsCommandExecuting = false
+  }
+})
+
 ipcMain.handle('gesture:clear-all', async () => {
   const store = getApplicationSettingsStore()
   const currentSettings = await store.getSettings()
   const assignmentCount = Object.keys(currentSettings.gestureAssignments)
     .filter((gesture) =>
       currentSettings.gestureAssignments[gesture] !== null ||
-      currentSettings.inputSequenceAssignments[gesture] !== null).length
+      currentSettings.inputSequenceAssignments[gesture] !== null ||
+      currentSettings.windowsCommandAssignments[gesture] !== null).length
 
   if (assignmentCount === 0) {
     return {
@@ -1165,7 +1229,7 @@ ipcMain.handle('gesture:clear-all', async () => {
     type: 'warning',
     title: '모든 제스처 배정 해제',
     message: '모든 제스처의 실행 동작을 해제하시겠습니까?',
-    detail: `한손 제스처 ${assignmentCount}개의 프로그램 및 입력 시퀀스 배정만 비워집니다. 저장된 프로그램 목록은 유지됩니다.`,
+    detail: `한손 제스처 ${assignmentCount}개의 프로그램, 입력 시퀀스 및 Windows 기능 배정만 비워집니다. 저장된 프로그램 목록은 유지됩니다.`,
     buttons: ['모두 비우기', '취소'],
     defaultId: 1,
     cancelId: 1,
@@ -1217,13 +1281,28 @@ function toSettingsError(error: unknown) {
     GESTURE_NOT_FOUND: '제스처를 찾을 수 없습니다.',
     INVALID_APPLICATION_NAME: '프로그램 이름을 입력하세요.',
     APPLICATION_ALREADY_REGISTERED: '이미 등록된 프로그램입니다.',
-    INVALID_INPUT_SEQUENCE: '키 입력 또는 대기 시간을 확인하세요.',
+    INVALID_INPUT_SEQUENCE: '키 입력, 대기 또는 스크롤 설정을 확인하세요.',
+    INVALID_WINDOWS_COMMAND: '지원하지 않는 Windows 기능입니다.',
     INVALID_GESTURE_HOLD_MS: '유지 시간은 80~2,000ms 사이로 입력하세요.',
   }
   return {
     success: false,
     error: code,
     message: messages[code] ?? '설정을 저장하지 못했습니다.',
+  }
+}
+
+function toWindowsCommandError(error: unknown) {
+  const code = error instanceof Error ? error.message : 'WINDOWS_COMMAND_EXECUTION_FAILED'
+  const messages: Record<string, string> = {
+    UNSUPPORTED_WINDOWS_COMMAND_PLATFORM: 'Windows 기능은 현재 Windows에서만 실행할 수 있습니다.',
+    INPUT_SEQUENCE_EXECUTION_FAILED: 'Windows에 기능 입력을 전달하지 못했습니다.',
+    WINDOWS_COMMAND_EXECUTION_FAILED: 'Windows 기능을 실행하지 못했습니다.',
+  }
+  return {
+    success: false,
+    error: code,
+    message: messages[code] ?? 'Windows 기능을 실행하지 못했습니다.',
   }
 }
 

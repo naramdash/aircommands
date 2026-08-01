@@ -102,8 +102,8 @@
 - During migration, assignments that still exactly match a former seeded default
   are cleared. Assignments changed by the user are preserved.
 - The five configurable one-hand gestures can independently launch a program,
-  run an input sequence, or remain unassigned. The left thumb + ring gesture
-  remains reserved for configured Google web login.
+  run an input sequence, invoke a Windows function, or remain unassigned. The
+  left thumb + ring gesture remains reserved for configured Google web login.
 - Windows selection searches `Get-StartApps` and user/all-user Start Menu shortcuts.
   The picker reads the in-memory copy immediately, receives background startup
   updates, and lets users force a refresh.
@@ -120,20 +120,31 @@
 - Custom target selection is Windows-only in v1. Built-in applications continue to
   use the existing platform command fallbacks on macOS and Linux.
 
-## Keyboard input sequences
+## Input sequences and Windows functions
 
-- The gesture action dialog has separate `프로그램` and `입력 시퀀스` categories.
-- A sequence contains key/chord steps and delay steps. For example, `P`, `300ms`,
-  `Enter` is stored and executed in that order. Ctrl, Alt, Shift, Win, letters,
-  digits, navigation keys, function keys, and common punctuation keys are supported.
-- Program and input-sequence assignments are mutually exclusive for each gesture.
-  Choosing one clears the other without deleting registered applications.
+- The gesture action dialog has separate `프로그램`, `입력 시퀀스`, and
+  `Windows 기능` categories. Their persisted assignment maps remain separate;
+  they are not merged into a generic action schema.
+- A sequence contains key/chord, delay, and mouse-wheel steps. For example, `P`,
+  `300ms`, scroll down three notches, and `Enter` are stored and executed in that
+  order. Ctrl, Alt, Shift, Win, letters, digits, navigation keys, function keys,
+  and common punctuation keys are supported.
+- Windows functions provide 13 predefined desktop shortcuts: next-window (`Alt+Tab`),
+  previous-window (`Alt+Shift+Tab`), screen snipping (`Win+Shift+S`), full screenshot auto-save
+  (`Win+PrtScn`), screen recording toggle (`Win+Alt+R`), Xbox Game Bar overlay (`Win+G`),
+  show/restore desktop (`Win+D`), Task View (`Win+Tab`), lock workstation (`Win+L`),
+  action center (`Win+A`), file explorer (`Win+E`), clipboard history (`Win+V`), and emoji picker (`Win+.`).
+- Program, input-sequence, and Windows-function assignments are mutually exclusive
+  for each gesture. Choosing one clears the other assignments without deleting
+  registered applications.
 - Sequence execution is Windows-only and uses validated virtual-key codes through
-  the Windows `SendInput` API. Input goes to the application that is active when
-  the gesture executes and cannot cross a higher-integrity/UAC boundary.
+  the Windows `SendInput` API for keyboard and mouse-wheel input. Input goes to the
+  application that is active when the gesture executes and cannot cross a
+  higher-integrity/UAC boundary.
 - The renderer sends only the gesture identifier when executing. The main process
-  loads the persisted sequence, revalidates it, and generates the native input
-  command without accepting raw PowerShell or arbitrary script text from the UI.
+  loads the persisted sequence or fixed Windows function, revalidates it, and
+  generates the native input command without accepting raw PowerShell or arbitrary
+  script text from the UI.
 
 ## Gesture hold duration
 

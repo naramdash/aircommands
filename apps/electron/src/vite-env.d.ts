@@ -66,9 +66,16 @@ interface Window {
       gesture: string
       steps: InputSequenceStep[]
     }): Promise<SettingsMutationResponse>
+    assignWindowsCommand(payload: {
+      gesture: string
+      command: WindowsCommand
+    }): Promise<SettingsMutationResponse>
     executeInputSequence(payload: {
       gesture: string
     }): Promise<InputSequenceExecutionResponse>
+    executeWindowsCommand(payload: {
+      gesture: string
+    }): Promise<WindowsCommandExecutionResponse>
     clearGestureAssignments(): Promise<SettingsMutationResponse & {
       canceled?: boolean
       clearedAssignments?: number
@@ -150,6 +157,7 @@ type UserSettingsView = {
   applications: ApplicationSummary[]
   gestureAssignments: Record<string, string | null>
   inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
+  windowsCommandAssignments: Record<string, WindowsCommand | null>
   gestureHoldMs: number
   platform: string
   supportsCustomApplications: boolean
@@ -172,7 +180,7 @@ type InputKey =
   | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M'
   | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z'
   | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
-  | 'ENTER' | 'SPACE' | 'TAB' | 'ESCAPE' | 'BACKSPACE' | 'DELETE' | 'INSERT'
+  | 'ENTER' | 'SPACE' | 'TAB' | 'ESCAPE' | 'BACKSPACE' | 'DELETE' | 'INSERT' | 'PRINT_SCREEN'
   | 'HOME' | 'END' | 'PAGE_UP' | 'PAGE_DOWN'
   | 'ARROW_UP' | 'ARROW_DOWN' | 'ARROW_LEFT' | 'ARROW_RIGHT'
   | 'F1' | 'F2' | 'F3' | 'F4' | 'F5' | 'F6'
@@ -183,8 +191,28 @@ type InputKey =
 type InputSequenceStep =
   | { type: 'keys', keys: InputKey[] }
   | { type: 'delay', durationMs: number }
+  | { type: 'scroll', direction: 'up' | 'down', notches: number }
+
+type WindowsCommand =
+  | 'switch-window-next'
+  | 'switch-window-previous'
+  | 'open-screen-snipping'
+  | 'save-full-screenshot'
+  | 'toggle-screen-recording'
+  | 'open-game-bar'
+  | 'show-desktop'
+  | 'task-view'
+  | 'lock-workstation'
+  | 'open-action-center'
+  | 'open-file-explorer'
+  | 'open-clipboard-history'
+  | 'open-emoji-picker'
 
 type InputSequenceExecutionResponse =
+  | { success: true, label: string, message: string }
+  | { success: false, error: string, message: string }
+
+type WindowsCommandExecutionResponse =
   | { success: true, label: string, message: string }
   | { success: false, error: string, message: string }
 

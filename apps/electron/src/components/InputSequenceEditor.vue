@@ -47,6 +47,12 @@ function addDelayStep() {
   errorMessage.value = ''
 }
 
+function addScrollStep() {
+  if (steps.value.length >= 32) return
+  steps.value.push({ type: 'scroll', direction: 'down', notches: 3 })
+  errorMessage.value = ''
+}
+
 function loadExample() {
   steps.value = [
     { type: 'keys', keys: ['P'] },
@@ -128,10 +134,17 @@ function validateSteps(): string {
       continue
     }
 
-    if (!Number.isInteger(step.durationMs) || step.durationMs < 10 || step.durationMs > 10_000) {
-      return '대기 시간은 10~10,000ms 사이의 정수로 입력하세요.'
+    if (step.type === 'delay') {
+      if (!Number.isInteger(step.durationMs) || step.durationMs < 10 || step.durationMs > 10_000) {
+        return '대기 시간은 10~10,000ms 사이의 정수로 입력하세요.'
+      }
+      totalDelayMs += step.durationMs
+      continue
     }
-    totalDelayMs += step.durationMs
+
+    if (!Number.isInteger(step.notches) || step.notches < 1 || step.notches > 20) {
+      return '스크롤 크기는 1~20칸 사이의 정수로 입력하세요.'
+    }
   }
 
   if (totalDelayMs > 30_000) return '전체 대기 시간은 최대 30초까지 설정할 수 있습니다.'
@@ -144,7 +157,7 @@ function validateSteps(): string {
     <div class="sequence-toolbar">
       <div>
         <h3>입력 순서</h3>
-        <p>키 입력과 대기를 위에서 아래 순서대로 실행합니다.</p>
+        <p>키 입력, 스크롤과 대기를 위에서 아래 순서대로 실행합니다.</p>
       </div>
       <button type="button" class="secondary" :disabled="isSaving" @click="loadExample">
         P → 0.3초 → Enter 예시
@@ -175,7 +188,7 @@ function validateSteps(): string {
           </button>
         </div>
 
-        <label v-else class="step-control delay-control">
+        <label v-else-if="step.type === 'delay'" class="step-control delay-control">
           <span class="step-type">대기</span>
           <span>
             <input
@@ -188,6 +201,25 @@ function validateSteps(): string {
             ms
           </span>
         </label>
+
+        <div v-else class="step-control scroll-control">
+          <span class="step-type">스크롤</span>
+          <span>
+            <select v-model="step.direction" :disabled="isSaving" aria-label="스크롤 방향">
+              <option value="up">위로</option>
+              <option value="down">아래로</option>
+            </select>
+            <input
+              v-model.number="step.notches"
+              type="number"
+              min="1"
+              max="20"
+              step="1"
+              :disabled="isSaving"
+              aria-label="스크롤 크기">
+            칸
+          </span>
+        </div>
 
         <div class="step-actions">
           <button
@@ -240,6 +272,13 @@ function validateSteps(): string {
           :disabled="isSaving || steps.length >= 32"
           @click="addDelayStep">
           + 대기
+        </button>
+        <button
+          type="button"
+          class="secondary"
+          :disabled="isSaving || steps.length >= 32"
+          @click="addScrollStep">
+          + 스크롤
         </button>
       </div>
       <button type="button" class="primary" :disabled="isSaving" @click="saveSequence">
@@ -372,13 +411,31 @@ function validateSteps(): string {
   font-size: 12px;
 }
 
-.delay-control input {
+.scroll-control > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #91a9c5;
+  font-size: 12px;
+}
+
+.delay-control input,
+.scroll-control input,
+.scroll-control select {
   width: 130px;
   padding: 9px 10px;
   color: #e7f0fb;
   background: #111c2b;
   border: 1px solid #49637e;
   border-radius: 9px;
+}
+
+.scroll-control input {
+  width: 78px;
+}
+
+.scroll-control select {
+  width: 92px;
 }
 
 .step-actions,

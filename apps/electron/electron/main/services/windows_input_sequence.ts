@@ -18,6 +18,7 @@ type WindowsInputSequenceOptions = {
 
 const execFileAsync = promisify(execFile)
 const KEY_HOLD_MS = 35
+const WHEEL_DELTA = 120
 
 const NAMED_VIRTUAL_KEYS: Partial<Record<InputKey, VirtualKey>> = {
   CONTROL: { code: 0x11 },
@@ -31,6 +32,7 @@ const NAMED_VIRTUAL_KEYS: Partial<Record<InputKey, VirtualKey>> = {
   BACKSPACE: { code: 0x08 },
   DELETE: { code: 0x2E, extended: true },
   INSERT: { code: 0x2D, extended: true },
+  PRINT_SCREEN: { code: 0x2C, extended: true },
   HOME: { code: 0x24, extended: true },
   END: { code: 0x23, extended: true },
   PAGE_UP: { code: 0x21, extended: true },
@@ -58,9 +60,28 @@ using System.Runtime.InteropServices;
 
 public static class AircommandsNativeInput
 {
+    private const uint INPUT_MOUSE = 0;
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint MOUSEEVENTF_WHEEL = 0x0800;
+    private const int WHEEL_DELTA = 120;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int x;
+        public int y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
@@ -109,6 +130,18 @@ public static class AircommandsNativeInput
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint inputCount, INPUT[] inputs, int inputSize);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int X, int Y);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
     public static void Key(ushort virtualKey, bool release, bool extended)
     {
         uint flags = release ? KEYEVENTF_KEYUP : 0;
@@ -133,6 +166,44 @@ public static class AircommandsNativeInput
         if (SendInput(1, new INPUT[] { input }, Marshal.SizeOf(typeof(INPUT))) != 1)
         {
             throw new InvalidOperationException("SendInput failed: " + Marshal.GetLastWin32Error());
+        }
+    }
+
+    public static void Wheel(int delta)
+    {
+        int absoluteDelta = Math.Abs(delta);
+        int sign = delta >= 0 ? 1 : -1;
+        int steps = absoluteDelta / WHEEL_DELTA;
+        if (steps == 0) steps = 1;
+
+        for (int i = 0; i < steps; i++)
+        {
+            INPUT input = new INPUT
+            {
+                type = INPUT_MOUSE,
+                data = new InputUnion
+                {
+                    mouse = new MOUSEINPUT
+                    {
+                        dx = 0,
+                        dy = 0,
+                        mouseData = unchecked((uint)(sign * WHEEL_DELTA)),
+                        dwFlags = MOUSEEVENTF_WHEEL,
+                        time = 0,
+                        dwExtraInfo = UIntPtr.Zero
+                    }
+                }
+            };
+
+            if (SendInput(1, new INPUT[] { input }, Marshal.SizeOf(typeof(INPUT))) != 1)
+            {
+                throw new InvalidOperationException("SendInput failed: " + Marshal.GetLastWin32Error());
+            }
+
+            if (steps > 1)
+            {
+                System.Threading.Thread.Sleep(20);
+            }
         }
     }
 }
@@ -166,6 +237,11 @@ export function buildPowerShellInputScript(steps: InputSequenceStep[]): string {
   const commands = steps.map((step) => {
     if (step.type === 'delay') {
       return `Start-Sleep -Milliseconds ${step.durationMs}`
+    }
+
+    if (step.type === 'scroll') {
+      const delta = step.notches * WHEEL_DELTA * (step.direction === 'up' ? 1 : -1)
+      return `[AircommandsNativeInput]::Wheel(${delta})`
     }
 
     const virtualKeys = step.keys.map(getVirtualKey)

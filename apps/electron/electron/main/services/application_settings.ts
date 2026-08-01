@@ -6,6 +6,10 @@ import {
   normalizeInputSequence,
   type InputSequenceStep,
 } from './input_sequence'
+import {
+  isWindowsCommand,
+  type WindowsCommand,
+} from './windows_command'
 
 export type ApplicationTarget =
   | { kind: 'builtin', key: string }
@@ -64,7 +68,16 @@ export type UserConfigV7 = {
   gestureHoldMs: number
 }
 
-export type UserConfig = UserConfigV7
+export type UserConfigV8 = {
+  version: 8
+  applications: ApplicationRecord[]
+  gestureAssignments: Record<string, string | null>
+  inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
+  windowsCommandAssignments: Record<string, WindowsCommand | null>
+  gestureHoldMs: number
+}
+
+export type UserConfig = UserConfigV8
 
 export type ApplicationSummary = {
   id: string
@@ -79,6 +92,7 @@ export type UserSettingsView = {
   applications: ApplicationSummary[]
   gestureAssignments: Record<string, string | null>
   inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
+  windowsCommandAssignments: Record<string, WindowsCommand | null>
   gestureHoldMs: number
   platform: NodeJS.Platform
   supportsCustomApplications: boolean
@@ -162,12 +176,16 @@ export function createDefaultSettings(): UserConfig {
   const inputSequenceAssignments = Object.fromEntries(
     ALL_GESTURE_NAMES.map((gesture) => [gesture, null]),
   )
+  const windowsCommandAssignments = Object.fromEntries(
+    ALL_GESTURE_NAMES.map((gesture) => [gesture, null]),
+  )
 
   return {
-    version: 7,
+    version: 8,
     applications,
     gestureAssignments,
     inputSequenceAssignments,
+    windowsCommandAssignments,
     gestureHoldMs: DEFAULT_GESTURE_HOLD_MS,
   }
 }
@@ -262,6 +280,7 @@ export class ApplicationSettingsStore {
       }
       draft.gestureAssignments[gesture] = applicationId
       draft.inputSequenceAssignments[gesture] = null
+      draft.windowsCommandAssignments[gesture] = null
     })
 
     return { settings, applicationId, created }
@@ -330,6 +349,7 @@ export class ApplicationSettingsStore {
 
       settings.gestureAssignments[gesture] = applicationId
       settings.inputSequenceAssignments[gesture] = null
+      settings.windowsCommandAssignments[gesture] = null
     })
   }
 
@@ -344,6 +364,21 @@ export class ApplicationSettingsStore {
 
       settings.gestureAssignments[gesture] = null
       settings.inputSequenceAssignments[gesture] = normalized
+      settings.windowsCommandAssignments[gesture] = null
+    })
+  }
+
+  async assignWindowsCommand(
+    gesture: string,
+    command: WindowsCommand,
+  ): Promise<UserConfig> {
+    return this.updateSettings((settings) => {
+      if (!isGestureName(gesture)) throw new Error('GESTURE_NOT_FOUND')
+      if (!isWindowsCommand(command)) throw new Error('INVALID_WINDOWS_COMMAND')
+
+      settings.gestureAssignments[gesture] = null
+      settings.inputSequenceAssignments[gesture] = null
+      settings.windowsCommandAssignments[gesture] = command
     })
   }
 
@@ -365,10 +400,12 @@ export class ApplicationSettingsStore {
       for (const gesture of ALL_GESTURE_NAMES) {
         if (
           draft.gestureAssignments[gesture] !== null ||
-          draft.inputSequenceAssignments[gesture] !== null
+          draft.inputSequenceAssignments[gesture] !== null ||
+          draft.windowsCommandAssignments[gesture] !== null
         ) {
           draft.gestureAssignments[gesture] = null
           draft.inputSequenceAssignments[gesture] = null
+          draft.windowsCommandAssignments[gesture] = null
           clearedAssignments += 1
         }
       }
@@ -453,7 +490,8 @@ export function migrateSettings(value: unknown): UserConfig | null {
       value.version !== 4 &&
       value.version !== 5 &&
       value.version !== 6 &&
-      value.version !== 7
+      value.version !== 7 &&
+      value.version !== 8
     )
   ) {
     return null
@@ -505,8 +543,21 @@ export function migrateSettings(value: unknown): UserConfig | null {
     }),
   )
 
+  const windowsCommandAssignments = Object.fromEntries(
+    ALL_GESTURE_NAMES.map((gesture) => {
+      if (value.version < 8 || !isRecord(value.windowsCommandAssignments)) {
+        return [gesture, null]
+      }
+      const command = value.windowsCommandAssignments[gesture]
+      return [gesture, isWindowsCommand(command) ? command : null]
+    }),
+  )
+
   for (const gesture of ALL_GESTURE_NAMES) {
-    if (inputSequenceAssignments[gesture] !== null) {
+    if (windowsCommandAssignments[gesture] !== null) {
+      gestureAssignments[gesture] = null
+      inputSequenceAssignments[gesture] = null
+    } else if (inputSequenceAssignments[gesture] !== null) {
       gestureAssignments[gesture] = null
     }
   }
@@ -516,17 +567,18 @@ export function migrateSettings(value: unknown): UserConfig | null {
     : DEFAULT_GESTURE_HOLD_MS
 
   return {
-    version: 7,
+    version: 8,
     applications,
     gestureAssignments,
     inputSequenceAssignments,
+    windowsCommandAssignments,
     gestureHoldMs,
   }
 }
 
 function parseApplicationTarget(
   value: unknown,
-  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
+  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
 ): ApplicationTarget | null {
   if (!isRecord(value)) return null
   if (value.kind === 'builtin' && typeof value.key === 'string' && value.key) {
@@ -561,7 +613,7 @@ function parseApplicationTarget(
 }
 
 function isLegacyDefaultAssignment(
-  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
+  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
   gesture: string,
   applicationId: string | null,
 ) {

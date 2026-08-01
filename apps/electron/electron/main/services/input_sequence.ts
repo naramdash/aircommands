@@ -12,6 +12,7 @@ export const INPUT_KEYS = [
   'BACKSPACE',
   'DELETE',
   'INSERT',
+  'PRINT_SCREEN',
   'HOME',
   'END',
   'PAGE_UP',
@@ -50,12 +51,15 @@ export type InputKey = typeof INPUT_KEYS[number]
 export type InputSequenceStep =
   | { type: 'keys', keys: InputKey[] }
   | { type: 'delay', durationMs: number }
+  | { type: 'scroll', direction: 'up' | 'down', notches: number }
 
 export const MAX_INPUT_SEQUENCE_STEPS = 32
 export const MAX_INPUT_SEQUENCE_KEYS = 5
 export const MIN_INPUT_SEQUENCE_DELAY_MS = 10
 export const MAX_INPUT_SEQUENCE_DELAY_MS = 10_000
 export const MAX_INPUT_SEQUENCE_TOTAL_DELAY_MS = 30_000
+export const MIN_INPUT_SEQUENCE_SCROLL_NOTCHES = 1
+export const MAX_INPUT_SEQUENCE_SCROLL_NOTCHES = 20
 
 const INPUT_KEY_SET = new Set<string>(INPUT_KEYS)
 const MODIFIER_ORDER: InputKey[] = ['CONTROL', 'ALT', 'SHIFT', 'META']
@@ -143,6 +147,25 @@ export function normalizeInputSequence(value: unknown): InputSequenceStep[] | nu
       continue
     }
 
+    if (candidate.type === 'scroll') {
+      if (
+        (candidate.direction !== 'up' && candidate.direction !== 'down') ||
+        typeof candidate.notches !== 'number' ||
+        !Number.isInteger(candidate.notches) ||
+        candidate.notches < MIN_INPUT_SEQUENCE_SCROLL_NOTCHES ||
+        candidate.notches > MAX_INPUT_SEQUENCE_SCROLL_NOTCHES
+      ) {
+        return null
+      }
+
+      normalized.push({
+        type: 'scroll',
+        direction: candidate.direction,
+        notches: candidate.notches,
+      })
+      continue
+    }
+
     return null
   }
 
@@ -156,8 +179,11 @@ export function formatInputKeys(keys: InputKey[]): string {
 export function formatInputSequence(steps: InputSequenceStep[]): string {
   return steps.map((step) => {
     if (step.type === 'keys') return formatInputKeys(step.keys)
-    const seconds = Number((step.durationMs / 1000).toFixed(2))
-    return `${seconds}초`
+    if (step.type === 'delay') {
+      const seconds = Number((step.durationMs / 1000).toFixed(2))
+      return `${seconds}초`
+    }
+    return `스크롤 ${step.direction === 'up' ? '위' : '아래'} ${step.notches}칸`
   }).join(' → ')
 }
 

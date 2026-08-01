@@ -25,13 +25,15 @@ describe('ApplicationSettingsStore', () => {
 
     const settings = await store.getSettings()
 
-    expect(settings.version).toBe(7)
+    expect(settings.version).toBe(8)
     expect(settings.gestureHoldMs).toBe(280)
     expect(settings.applications).toHaveLength(21)
     expect(Object.keys(settings.gestureAssignments)).toHaveLength(6)
     expect(Object.values(settings.gestureAssignments).every((assignment) =>
       assignment === null)).toBe(true)
     expect(Object.values(settings.inputSequenceAssignments).every((assignment) =>
+      assignment === null)).toBe(true)
+    expect(Object.values(settings.windowsCommandAssignments).every((assignment) =>
       assignment === null)).toBe(true)
     expect(JSON.parse(await readFile(settingsPath, 'utf8'))).toEqual(settings)
   })
@@ -73,15 +75,18 @@ describe('ApplicationSettingsStore', () => {
       { type: 'delay', durationMs: 300 },
       { type: 'keys', keys: ['ENTER'] },
     ])
+    await store.assignWindowsCommand(ALL_GESTURE_NAMES[2], 'switch-window-next')
 
     const result = await store.clearGestureAssignments()
     const reloaded = await new ApplicationSettingsStore(settingsPath).getSettings()
 
-    expect(result.clearedAssignments).toBe(2)
+    expect(result.clearedAssignments).toBe(3)
     expect(result.settings.applications).toEqual(initial.applications)
     expect(Object.values(result.settings.gestureAssignments).every((assignment) =>
       assignment === null)).toBe(true)
     expect(Object.values(result.settings.inputSequenceAssignments).every((assignment) =>
+      assignment === null)).toBe(true)
+    expect(Object.values(result.settings.windowsCommandAssignments).every((assignment) =>
       assignment === null)).toBe(true)
     expect(reloaded).toEqual(result.settings)
   })
@@ -111,6 +116,31 @@ describe('ApplicationSettingsStore', () => {
     expect(withApplication.gestureAssignments[gesture]).toBe('builtin:notepad')
     expect(withApplication.inputSequenceAssignments[gesture]).toBeNull()
     expect(reloaded).toEqual(withApplication)
+  })
+
+  it('persists Windows commands separately and keeps every assignment type exclusive', async () => {
+    const settingsPath = await createSettingsPath()
+    const gesture = ALL_GESTURE_NAMES[0]
+    const store = new ApplicationSettingsStore(settingsPath)
+    await store.getSettings()
+    await store.assignGesture(gesture, 'builtin:notepad')
+
+    const withWindowsCommand = await store.assignWindowsCommand(
+      gesture,
+      'switch-window-next',
+    )
+
+    expect(withWindowsCommand.gestureAssignments[gesture]).toBeNull()
+    expect(withWindowsCommand.inputSequenceAssignments[gesture]).toBeNull()
+    expect(withWindowsCommand.windowsCommandAssignments[gesture]).toBe('switch-window-next')
+
+    const withSequence = await store.assignInputSequence(gesture, [
+      { type: 'scroll', direction: 'down', notches: 3 },
+    ])
+    expect(withSequence.windowsCommandAssignments[gesture]).toBeNull()
+    expect(withSequence.inputSequenceAssignments[gesture]).toEqual([
+      { type: 'scroll', direction: 'down', notches: 3 },
+    ])
   })
 
   it('rejects invalid input sequences without changing the saved assignment', async () => {
@@ -195,14 +225,14 @@ describe('ApplicationSettingsStore', () => {
     const migrated = await new ApplicationSettingsStore(settingsPath).getSettings()
     const persisted = JSON.parse(await readFile(settingsPath, 'utf8'))
 
-    expect(migrated.version).toBe(7)
+    expect(migrated.version).toBe(8)
     expect(migrated.gestureAssignments).not.toHaveProperty('touch_left_index_right_index')
     expect(persisted).toEqual(migrated)
   })
 })
 
 describe('migrateSettings', () => {
-  it('migrates v1 settings to v7 without changing custom one-hand assignments', () => {
+  it('migrates v1 settings to v8 without changing custom one-hand assignments', () => {
     const current = createDefaultSettings()
     const legacy = {
       ...current,
@@ -215,7 +245,7 @@ describe('migrateSettings', () => {
 
     const migrated = migrateSettings(legacy)
 
-    expect(migrated?.version).toBe(7)
+    expect(migrated?.version).toBe(8)
     expect(migrated?.gestureHoldMs).toBe(280)
     expect(migrated?.applications).toEqual(current.applications)
     expect(migrated?.gestureAssignments).toEqual({
@@ -243,7 +273,7 @@ describe('migrateSettings', () => {
     })
   })
 
-  it('migrates v4 settings to v7 without changing user assignments', () => {
+  it('migrates v4 settings to v8 without changing user assignments', () => {
     const current = createDefaultSettings()
     const versionFourSettings = {
       ...current,
@@ -256,7 +286,7 @@ describe('migrateSettings', () => {
 
     expect(migrateSettings(versionFourSettings)).toEqual({
       ...versionFourSettings,
-      version: 7,
+      version: 8,
     })
   })
 
@@ -279,7 +309,7 @@ describe('migrateSettings', () => {
     expect(first.created).toBe(true)
     expect(second.created).toBe(false)
     expect(second.applicationId).toBe(first.applicationId)
-    expect(reloaded.version).toBe(7)
+    expect(reloaded.version).toBe(8)
     expect(reloaded.applications.filter((application) =>
       application.target.kind === 'steam-app')).toEqual([
       expect.objectContaining({
@@ -365,8 +395,27 @@ describe('migrateSettings', () => {
     expect(migrated?.inputSequenceAssignments[invalidGesture]).toBeNull()
   })
 
+  it('preserves valid v8 Windows commands and clears conflicting assignments', () => {
+    const settings = createDefaultSettings()
+    const validGesture = ALL_GESTURE_NAMES[0]
+    const invalidGesture = ALL_GESTURE_NAMES[1]
+    settings.gestureAssignments[validGesture] = 'builtin:chrome'
+    settings.inputSequenceAssignments[validGesture] = [
+      { type: 'keys', keys: ['P'] },
+    ]
+    settings.windowsCommandAssignments[validGesture] = 'open-screen-snipping'
+    settings.windowsCommandAssignments[invalidGesture] = 'unsupported' as never
+
+    const migrated = migrateSettings(settings)
+
+    expect(migrated?.windowsCommandAssignments[validGesture]).toBe('open-screen-snipping')
+    expect(migrated?.gestureAssignments[validGesture]).toBeNull()
+    expect(migrated?.inputSequenceAssignments[validGesture]).toBeNull()
+    expect(migrated?.windowsCommandAssignments[invalidGesture]).toBeNull()
+  })
+
   it('rejects unknown settings versions', () => {
-    expect(migrateSettings({ version: 8 })).toBeNull()
+    expect(migrateSettings({ version: 9 })).toBeNull()
   })
 })
 

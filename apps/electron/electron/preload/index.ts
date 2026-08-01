@@ -84,12 +84,35 @@ contextBridge.exposeInMainWorld('aircommands', {
     steps: Array<
       | { type: 'keys'; keys: string[] }
       | { type: 'delay'; durationMs: number }
+      | { type: 'scroll'; direction: 'up' | 'down'; notches: number }
     >
   }) {
     return ipcRenderer.invoke('gesture:assign-input-sequence', payload)
   },
+  assignWindowsCommand(payload: {
+    gesture: string
+    command:
+      | 'switch-window-next'
+      | 'switch-window-previous'
+      | 'open-screen-snipping'
+      | 'save-full-screenshot'
+      | 'toggle-screen-recording'
+      | 'open-game-bar'
+      | 'show-desktop'
+      | 'task-view'
+      | 'lock-workstation'
+      | 'open-action-center'
+      | 'open-file-explorer'
+      | 'open-clipboard-history'
+      | 'open-emoji-picker'
+  }) {
+    return ipcRenderer.invoke('gesture:assign-windows-command', payload)
+  },
   executeInputSequence(payload: { gesture: string }) {
     return ipcRenderer.invoke('input-sequence:execute', payload)
+  },
+  executeWindowsCommand(payload: { gesture: string }) {
+    return ipcRenderer.invoke('windows-command:execute', payload)
   },
   clearGestureAssignments() {
     return ipcRenderer.invoke('gesture:clear-all')

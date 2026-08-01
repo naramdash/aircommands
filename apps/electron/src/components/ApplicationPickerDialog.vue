@@ -4,6 +4,7 @@ import {
   filterAndSortApplications,
   filterSelectableRegisteredApplications,
 } from '../utils/application_search'
+import { WINDOWS_COMMAND_OPTIONS } from '../utils/windows_command'
 import InputSequenceEditor from './InputSequenceEditor.vue'
 
 const props = defineProps<{
@@ -27,10 +28,12 @@ const discoveryWarning = ref('')
 const isEditingName = ref(false)
 const isReplacingCurrent = ref(false)
 const editingName = ref('')
-const selectedCategory = ref<'application' | 'input-sequence'>(
-  props.gesture && props.settings.inputSequenceAssignments[props.gesture]
-    ? 'input-sequence'
-    : 'application',
+const selectedCategory = ref<'application' | 'input-sequence' | 'windows-command'>(
+  props.gesture && props.settings.windowsCommandAssignments[props.gesture]
+    ? 'windows-command'
+    : props.gesture && props.settings.inputSequenceAssignments[props.gesture]
+      ? 'input-sequence'
+      : 'application',
 )
 let removeCatalogListener: (() => void) | null = null
 
@@ -47,7 +50,7 @@ const title = computed(() => {
 })
 
 const description = computed(() => mode.value === 'assign'
-  ? '프로그램 실행 또는 키 입력 시퀀스를 이 제스처에 배정합니다.'
+  ? '프로그램, 입력 시퀀스 또는 Windows 기능을 이 제스처에 배정합니다.'
   : '프로그램을 고르면 설정이 바로 저장됩니다.')
 
 const currentApplicationId = computed(() =>
@@ -55,6 +58,9 @@ const currentApplicationId = computed(() =>
 
 const currentInputSequence = computed(() =>
   props.gesture ? props.settings.inputSequenceAssignments[props.gesture] : null)
+
+const currentWindowsCommand = computed(() =>
+  props.gesture ? props.settings.windowsCommandAssignments[props.gesture] : null)
 
 const currentApplication = computed(() => {
   const applicationId = props.replaceApplicationId ?? currentApplicationId.value
@@ -206,6 +212,17 @@ async function clearAssignment() {
   )
 }
 
+async function selectWindowsCommand(command: WindowsCommand) {
+  if (!props.gesture) return
+  await runMutation(
+    window.aircommands.assignWindowsCommand({
+      gesture: props.gesture,
+      command,
+    }),
+    'Windows 기능을 제스처에 배정했습니다.',
+  )
+}
+
 function getApplicationSourceLabel(
   targetKind: ApplicationSummary['targetKind'] | DiscoveredApplication['targetKind'],
 ) {
@@ -317,6 +334,13 @@ function getErrorMessage(error: unknown) {
           <span>⌨️</span>
           입력 시퀀스
         </button>
+        <button
+          type="button"
+          :class="{ active: selectedCategory === 'windows-command' }"
+          @click="selectedCategory = 'windows-command'">
+          <span>🪟</span>
+          Windows 기능
+        </button>
       </nav>
 
       <section
@@ -380,6 +404,40 @@ function getErrorMessage(error: unknown) {
           @update="emit('update', $event)"
           @status="(message, isError) => emit('status', message, isError)" />
 
+        <section v-else-if="selectedCategory === 'windows-command' && gesture">
+          <div class="section-title">
+            <div>
+              <h3>Windows 기능 선택</h3>
+              <p class="section-description">창 전환이나 화면 캡처를 제스처 한 번으로 실행합니다.</p>
+            </div>
+          </div>
+          <div class="app-list">
+            <button
+              type="button"
+              class="app-item unassigned"
+              :class="{ selected: !currentApplicationId && !currentInputSequence && !currentWindowsCommand }"
+              :disabled="isMutating"
+              @click="clearAssignment">
+              <span class="app-emoji">➖</span>
+              <span><strong>미배정</strong><small>이 제스처에서 아무 동작도 실행하지 않음</small></span>
+            </button>
+            <button
+              v-for="option in WINDOWS_COMMAND_OPTIONS"
+              :key="option.command"
+              type="button"
+              class="app-item"
+              :class="{ selected: option.command === currentWindowsCommand }"
+              :disabled="isMutating"
+              @click="selectWindowsCommand(option.command)">
+              <span class="app-emoji">{{ option.icon }}</span>
+              <span>
+                <strong>{{ option.label }}</strong>
+                <small>{{ option.description }}</small>
+              </span>
+            </button>
+          </div>
+        </section>
+
         <section v-else-if="mode !== 'replace'">
           <div class="section-title">
             <h3>프로그램 선택</h3>
@@ -392,7 +450,7 @@ function getErrorMessage(error: unknown) {
               v-if="mode === 'assign'"
               type="button"
               class="app-item unassigned"
-              :class="{ selected: !currentApplicationId && !currentInputSequence }"
+              :class="{ selected: !currentApplicationId && !currentInputSequence && !currentWindowsCommand }"
               :disabled="isMutating"
               @click="clearAssignment">
               <span class="app-emoji">➖</span>
@@ -658,6 +716,12 @@ input {
 
 .section-title span {
   color: #9eb6d1;
+  font-size: 11px;
+}
+
+.section-description {
+  margin: 4px 0 0;
+  color: #91a9c5;
   font-size: 11px;
 }
 

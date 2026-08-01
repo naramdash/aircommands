@@ -93,15 +93,24 @@ export function formatInputKeys(keys: InputKey[]): string {
 export function formatInputSequence(steps: InputSequenceStep[]): string {
   return steps.map((step) => {
     if (step.type === 'keys') return formatInputKeys(step.keys)
-    const seconds = Number((step.durationMs / 1000).toFixed(2))
-    return `${seconds}초`
+    if (step.type === 'delay') {
+      const seconds = Number((step.durationMs / 1000).toFixed(2))
+      return `${seconds}초`
+    }
+    return `스크롤 ${step.direction === 'up' ? '위' : '아래'} ${step.notches}칸`
   }).join(' → ')
 }
 
 export function toSerializableInputSequence(steps: InputSequenceStep[]): InputSequenceStep[] {
-  return steps.map((step) => step.type === 'keys'
-    ? { type: 'keys', keys: [...step.keys] }
-    : { type: 'delay', durationMs: step.durationMs })
+  return steps.map((step) => {
+    if (step.type === 'keys') return { type: 'keys', keys: [...step.keys] }
+    if (step.type === 'delay') return { type: 'delay', durationMs: step.durationMs }
+    return {
+      type: 'scroll',
+      direction: step.direction,
+      notches: step.notches,
+    }
+  })
 }
 
 function getPrimaryInputKey(event: KeyboardEvent): InputKey | null {

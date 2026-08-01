@@ -24,6 +24,7 @@ import type {
 } from './utils/gesture_command_detection/types'
 import { handLandmarker } from './utils/hand_landmark_detection'
 import { formatInputSequence } from './utils/input_sequence'
+import { getWindowsCommandOption } from './utils/windows_command'
 
 const FINGER_RADIUS = 5
 const ACTIVE_FINGER_RADIUS = 8
@@ -69,7 +70,8 @@ const gestureHoldMs = computed(() => settings.value?.gestureHoldMs ?? TOUCH_HOLD
 const hasGestureAssignments = computed(() =>
   Object.keys(settings.value?.gestureAssignments ?? {}).some((gesture) =>
     settings.value?.gestureAssignments[gesture] !== null ||
-    settings.value?.inputSequenceAssignments[gesture] !== null))
+    settings.value?.inputSequenceAssignments[gesture] !== null ||
+    settings.value?.windowsCommandAssignments[gesture] !== null))
 const isRecognitionOnHold = computed(() => Boolean(poseWarning.value))
 const oneHandGestureGroups = computed(() => [
   {
@@ -148,6 +150,10 @@ function getInputSequenceForGesture(gesture: GestureName) {
   return settings.value?.inputSequenceAssignments[gesture] ?? null
 }
 
+function getWindowsCommandForGesture(gesture: GestureName) {
+  return settings.value?.windowsCommandAssignments[gesture] ?? null
+}
+
 function isWebLoginGesture(gesture: GestureName) {
   return gesture === WEB_LOGIN_GESTURE
 }
@@ -156,17 +162,21 @@ function getGestureApplicationLabel(gesture: GestureName) {
   if (isWebLoginGesture(gesture)) return 'Google 웹 로그인'
   const inputSequence = getInputSequenceForGesture(gesture)
   if (inputSequence) return formatInputSequence(inputSequence)
+  const windowsCommand = getWindowsCommandOption(getWindowsCommandForGesture(gesture))
+  if (windowsCommand) return windowsCommand.label
   return getApplicationForGesture(gesture)?.name ?? '미지정'
 }
 
 function getGestureApplicationIcon(gesture: GestureName) {
   if (isWebLoginGesture(gesture)) return '🔐'
   if (getInputSequenceForGesture(gesture)) return '⌨️'
+  const windowsCommand = getWindowsCommandOption(getWindowsCommandForGesture(gesture))
+  if (windowsCommand) return windowsCommand.icon
   return getApplicationForGesture(gesture)?.iconText ?? '➖'
 }
 
 function getGestureApplicationIconDataUrl(gesture: GestureName) {
-  if (getInputSequenceForGesture(gesture)) return undefined
+  if (getInputSequenceForGesture(gesture) || getWindowsCommandForGesture(gesture)) return undefined
   return getApplicationForGesture(gesture)?.iconDataUrl
 }
 
@@ -659,6 +669,46 @@ async function executeCandidate(candidate: GestureCandidate) {
     } catch (error) {
       commandResultMessage.value = `${actionLabel} 실패`
       const message = error instanceof Error ? error.message : '입력 시퀀스를 실행하지 못했습니다.'
+      errorMessage.value = message
+      await notifyGestureResult({
+        status: 'failure',
+        gestureLabel: candidate.gestureLabel,
+        appLabel: actionLabel,
+        message,
+      })
+    }
+    return
+  }
+
+  const windowsCommand = settings.value?.windowsCommandAssignments[candidate.gesture]
+  const windowsCommandOption = getWindowsCommandOption(windowsCommand)
+  if (windowsCommand && windowsCommandOption) {
+    const actionLabel = windowsCommandOption.label
+    commandResultMessage.value = `${actionLabel} 실행 중`
+    try {
+      const response = await window.aircommands.executeWindowsCommand({
+        gesture: candidate.gesture,
+      })
+      if (response.success) {
+        commandResultMessage.value = `${actionLabel} 완료`
+        await notifyGestureResult({
+          status: 'success',
+          gestureLabel: candidate.gestureLabel,
+          appLabel: actionLabel,
+        })
+      } else {
+        commandResultMessage.value = `${actionLabel} 실패`
+        errorMessage.value = response.message
+        await notifyGestureResult({
+          status: 'failure',
+          gestureLabel: candidate.gestureLabel,
+          appLabel: actionLabel,
+          message: response.message,
+        })
+      }
+    } catch (error) {
+      commandResultMessage.value = `${actionLabel} 실패`
+      const message = error instanceof Error ? error.message : 'Windows 기능을 실행하지 못했습니다.'
       errorMessage.value = message
       await notifyGestureResult({
         status: 'failure',

@@ -44,14 +44,16 @@ describe('input sequence keyboard capture', () => {
     expect(formatInputSequence([
       { type: 'keys', keys: ['P'] },
       { type: 'delay', durationMs: 300 },
+      { type: 'scroll', direction: 'down', notches: 3 },
       { type: 'keys', keys: ['ENTER'] },
-    ])).toBe('P → 0.3초 → Enter')
+    ])).toBe('P → 0.3초 → 스크롤 아래 3칸 → Enter')
   })
 
   it('converts Vue proxies into values Electron IPC can structured-clone', () => {
     const reactiveSteps = reactive<InputSequenceStep[]>([
       { type: 'keys', keys: ['P'] },
       { type: 'delay', durationMs: 300 },
+      { type: 'scroll', direction: 'up', notches: 2 },
       { type: 'keys', keys: ['ENTER'] },
     ])
 
@@ -63,6 +65,7 @@ describe('input sequence keyboard capture', () => {
     expect(structuredClone(serializable)).toEqual([
       { type: 'keys', keys: ['P'] },
       { type: 'delay', durationMs: 300 },
+      { type: 'scroll', direction: 'up', notches: 2 },
       { type: 'keys', keys: ['ENTER'] },
     ])
   })
