@@ -62,6 +62,9 @@ const currentInputSequence = computed(() =>
 const currentWindowsCommand = computed(() =>
   props.gesture ? props.settings.windowsCommandAssignments[props.gesture] : null)
 
+const currentGestureModifier = computed(() =>
+  props.gesture ? (props.settings.gestureModifierAssignments[props.gesture] ?? 'none') : 'none')
+
 const currentApplication = computed(() => {
   const applicationId = props.replaceApplicationId ?? currentApplicationId.value
   return props.settings.applications.find((application) =>
@@ -223,6 +226,22 @@ async function selectWindowsCommand(command: WindowsCommand) {
   )
 }
 
+async function selectGestureModifier(modifier: 'none' | 'control_left' | 'control_right') {
+  if (!props.gesture) return
+  await runMutation(
+    window.aircommands.assignGestureModifier({
+      gesture: props.gesture,
+      modifier,
+    }),
+    modifier === 'none'
+      ? '필수 키 조건 없이 언제나 인식하도록 설정했습니다.'
+      : modifier === 'control_left'
+        ? '왼쪽 Ctrl 키 누름 조건을 설정했습니다.'
+        : '오른쪽 Ctrl 키 누름 조건을 설정했습니다.',
+    false,
+  )
+}
+
 function getApplicationSourceLabel(
   targetKind: ApplicationSummary['targetKind'] | DiscoveredApplication['targetKind'],
 ) {
@@ -342,6 +361,36 @@ function getErrorMessage(error: unknown) {
           Windows 기능
         </button>
       </nav>
+
+      <div v-if="mode === 'assign' && gesture" class="modifier-bar">
+        <span class="modifier-title">인식 조건 (필수 키):</span>
+        <div class="modifier-options">
+          <button
+            type="button"
+            class="modifier-pill"
+            :class="{ active: currentGestureModifier === 'none' }"
+            :disabled="isMutating"
+            @click="selectGestureModifier('none')">
+            없음 (언제나 인식)
+          </button>
+          <button
+            type="button"
+            class="modifier-pill"
+            :class="{ active: currentGestureModifier === 'control_left' }"
+            :disabled="isMutating"
+            @click="selectGestureModifier('control_left')">
+            왼쪽 Ctrl
+          </button>
+          <button
+            type="button"
+            class="modifier-pill"
+            :class="{ active: currentGestureModifier === 'control_right' }"
+            :disabled="isMutating"
+            @click="selectGestureModifier('control_right')">
+            오른쪽 Ctrl
+          </button>
+        </div>
+      </div>
 
       <section
         v-if="selectedCategory === 'application' && currentApplication && gesture"
@@ -800,6 +849,54 @@ input {
   color: #9eb6d1;
   font-size: 11px;
   border-top: 1px solid rgba(94, 119, 150, 0.35);
+}
+
+.modifier-bar {
+  margin: 10px 18px 0;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(71, 85, 105, 0.45);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.modifier-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #94a3b8;
+}
+
+.modifier-options {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.modifier-pill {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(71, 85, 105, 0.5);
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.modifier-pill:hover:not(:disabled) {
+  border-color: #38bdf8;
+  color: #f8fafc;
+}
+
+.modifier-pill.active {
+  background: rgba(14, 165, 233, 0.25);
+  border-color: #38bdf8;
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
 }
 
 .picker-footer > div {

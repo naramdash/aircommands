@@ -108,6 +108,12 @@ contextBridge.exposeInMainWorld('aircommands', {
   }) {
     return ipcRenderer.invoke('gesture:assign-windows-command', payload)
   },
+  assignGestureModifier(payload: {
+    gesture: string
+    modifier: 'none' | 'control_left' | 'control_right'
+  }) {
+    return ipcRenderer.invoke('gesture:assign-modifier', payload)
+  },
   executeInputSequence(payload: { gesture: string }) {
     return ipcRenderer.invoke('input-sequence:execute', payload)
   },

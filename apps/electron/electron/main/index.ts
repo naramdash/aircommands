@@ -16,6 +16,7 @@ import { openAppRequest } from './services/open_app'
 import {
   configureApplicationSettingsStore,
   getApplicationSettingsStore,
+  isGestureModifier,
 } from './services/application_settings'
 import { formatInputSequence } from './services/input_sequence'
 import { executeWindowsInputSequence } from './services/windows_input_sequence'
@@ -1133,6 +1134,26 @@ ipcMain.handle('gesture:assign-windows-command', async (_event, payload) => {
   }
 })
 
+ipcMain.handle('gesture:assign-modifier', async (_event, payload) => {
+  if (
+    !isRecord(payload) ||
+    typeof payload.gesture !== 'string' ||
+    !isGestureModifier(payload.modifier)
+  ) {
+    return { success: false, error: 'INVALID_BODY', message: '수정 키 정보가 올바르지 않습니다.' }
+  }
+
+  try {
+    const settings = await getApplicationSettingsStore().assignGestureModifier(
+      payload.gesture,
+      payload.modifier,
+    )
+    return { success: true, settings: await buildSettingsView(settings) }
+  } catch (error) {
+    return toSettingsError(error)
+  }
+})
+
 ipcMain.handle('input-sequence:execute', async (_event, payload) => {
   if (!isRecord(payload) || typeof payload.gesture !== 'string') {
     return { success: false, error: 'INVALID_BODY', message: '제스처 정보가 올바르지 않습니다.' }
@@ -1283,6 +1304,7 @@ function toSettingsError(error: unknown) {
     APPLICATION_ALREADY_REGISTERED: '이미 등록된 프로그램입니다.',
     INVALID_INPUT_SEQUENCE: '키 입력, 대기 또는 스크롤 설정을 확인하세요.',
     INVALID_WINDOWS_COMMAND: '지원하지 않는 Windows 기능입니다.',
+    INVALID_GESTURE_MODIFIER: '올바른 수정 키(없음, 왼쪽 Ctrl, 오른쪽 Ctrl)를 선택하세요.',
     INVALID_GESTURE_HOLD_MS: '유지 시간은 80~2,000ms 사이로 입력하세요.',
   }
   return {

@@ -52,6 +52,9 @@ const currentCandidateLabel = ref('없음')
 const currentTouchLabel = ref('없음')
 const currentTouchGesture = ref<GestureName | ''>('')
 const poseWarning = ref('')
+const modifierWarning = ref('')
+const isControlLeftPressed = ref(false)
+const isControlRightPressed = ref(false)
 const touchProgressPercent = ref(0)
 const touchDistanceText = ref('없음')
 const cooldownRemainingMs = ref(0)
@@ -129,12 +132,52 @@ const phaseGuideText = computed(() => {
   if (!isCameraActive.value) return '카메라를 시작하세요'
   if (!isLeftHandVisible.value && !isRightHandVisible.value) return '손을 화면에 보여주세요'
   if (poseWarning.value) return poseWarning.value
+  if (modifierWarning.value) return modifierWarning.value
   if (recognitionState.value === 'touching') return '손가락 접촉을 잠깐 유지하면 명령이 실행됩니다'
   if (recognitionState.value === 'executing') return '명령 실행 중입니다'
   if (recognitionState.value === 'cooldown') return '다음 입력을 잠시 대기합니다'
   if (recognitionState.value === 'error') return '오류 상태입니다'
   return '한 손에서 엄지와 검지·중지·약지 중 하나를 맞대세요'
 })
+
+function handleKeyDown(event: KeyboardEvent) {
+  if (event.code === 'ControlLeft') {
+    isControlLeftPressed.value = true
+  } else if (event.code === 'ControlRight') {
+    isControlRightPressed.value = true
+  }
+}
+
+function handleKeyUp(event: KeyboardEvent) {
+  if (event.code === 'ControlLeft') {
+    isControlLeftPressed.value = false
+  } else if (event.code === 'ControlRight') {
+    isControlRightPressed.value = false
+  }
+}
+
+function handleWindowBlur() {
+  isControlLeftPressed.value = false
+  isControlRightPressed.value = false
+}
+
+function getGestureModifier(gesture: GestureName) {
+  return settings.value?.gestureModifierAssignments[gesture] ?? 'none'
+}
+
+function isGestureModifierSatisfied(gesture: GestureName) {
+  const modifier = getGestureModifier(gesture)
+  if (modifier === 'control_left') return isControlLeftPressed.value
+  if (modifier === 'control_right') return isControlRightPressed.value
+  return true
+}
+
+function getGestureModifierBadge(gesture: GestureName) {
+  const modifier = getGestureModifier(gesture)
+  if (modifier === 'control_left') return 'L-Ctrl'
+  if (modifier === 'control_right') return 'R-Ctrl'
+  return ''
+}
 
 function getFingerColor(finger: FingerName) {
   return `rgb(${FINGER_COLORS[finger]})`
@@ -328,7 +371,24 @@ function drawCameraFrame() {
 
     const now = performance.now()
     const result = handLandmarker.detectForVideo(video, now)
-    const touchFrame = getTouchFrame(result.landmarks, result.handednesses, now)
+    const rawTouchFrame = getTouchFrame(result.landmarks, result.handednesses, now)
+    let touchFrame = rawTouchFrame
+
+    if (
+      rawTouchFrame.closestContact &&
+      !isGestureModifierSatisfied(rawTouchFrame.closestContact.gesture)
+    ) {
+      const requiredModifier = getGestureModifier(rawTouchFrame.closestContact.gesture)
+      const keyLabel = requiredModifier === 'control_left' ? '왼쪽 Ctrl (ControlLeft)' : '오른쪽 Ctrl (ControlRight)'
+      modifierWarning.value = `${keyLabel} 키를 누른 상태에서 제스처를 취하세요`
+      touchFrame = {
+        ...rawTouchFrame,
+        closestContact: null,
+      }
+    } else {
+      modifierWarning.value = ''
+    }
+
     const recognitionResult = reduceRecognitionFrame(
       recognitionContext,
       touchFrame,
@@ -796,11 +856,17 @@ onMounted(async () => {
       })),
     }
   })
+  window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('keyup', handleKeyUp)
+  window.addEventListener('blur', handleWindowBlur)
   await loadSettings()
   await startCamera()
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('keyup', handleKeyUp)
+  window.removeEventListener('blur', handleWindowBlur)
   removeCatalogListener?.()
   clearGestureCompletionNotice()
   stopCamera()
@@ -909,6 +975,9 @@ onBeforeUnmount(() => {
                 class="gesture-application-icon">
               <span v-else>{{ getGestureApplicationIcon(command.gesture) }}</span>
               {{ getGestureApplicationLabel(command.gesture) }}
+              <span v-if="getGestureModifierBadge(command.gesture)" class="modifier-badge">
+                {{ getGestureModifierBadge(command.gesture) }}
+              </span>
               <span v-if="isWebLoginGesture(command.gesture)" class="fixed-label">고정</span>
             </strong>
           </li>
@@ -1277,6 +1346,17 @@ onBeforeUnmount(() => {
   color: #c4b5fd;
   font-size: 10px;
   letter-spacing: 0.03em;
+}
+
+.modifier-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(14, 165, 233, 0.2);
+  border: 1px solid rgba(56, 189, 248, 0.6);
+  color: #38bdf8;
+  letter-spacing: 0.02em;
 }
 
 .bottom-bar {

@@ -68,6 +68,14 @@ export type UserConfigV7 = {
   gestureHoldMs: number
 }
 
+export type GestureModifier = 'none' | 'control_left' | 'control_right'
+
+export const GESTURE_MODIFIERS = ['none', 'control_left', 'control_right'] as const
+
+export function isGestureModifier(value: unknown): value is GestureModifier {
+  return typeof value === 'string' && GESTURE_MODIFIERS.includes(value as GestureModifier)
+}
+
 export type UserConfigV8 = {
   version: 8
   applications: ApplicationRecord[]
@@ -77,7 +85,17 @@ export type UserConfigV8 = {
   gestureHoldMs: number
 }
 
-export type UserConfig = UserConfigV8
+export type UserConfigV9 = {
+  version: 9
+  applications: ApplicationRecord[]
+  gestureAssignments: Record<string, string | null>
+  inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
+  windowsCommandAssignments: Record<string, WindowsCommand | null>
+  gestureModifierAssignments: Record<string, GestureModifier | null>
+  gestureHoldMs: number
+}
+
+export type UserConfig = UserConfigV9
 
 export type ApplicationSummary = {
   id: string
@@ -93,6 +111,7 @@ export type UserSettingsView = {
   gestureAssignments: Record<string, string | null>
   inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
   windowsCommandAssignments: Record<string, WindowsCommand | null>
+  gestureModifierAssignments: Record<string, GestureModifier | null>
   gestureHoldMs: number
   platform: NodeJS.Platform
   supportsCustomApplications: boolean
@@ -179,13 +198,17 @@ export function createDefaultSettings(): UserConfig {
   const windowsCommandAssignments = Object.fromEntries(
     ALL_GESTURE_NAMES.map((gesture) => [gesture, null]),
   )
+  const gestureModifierAssignments = Object.fromEntries(
+    ALL_GESTURE_NAMES.map((gesture) => [gesture, 'none']),
+  )
 
   return {
-    version: 8,
+    version: 9,
     applications,
     gestureAssignments,
     inputSequenceAssignments,
     windowsCommandAssignments,
+    gestureModifierAssignments,
     gestureHoldMs: DEFAULT_GESTURE_HOLD_MS,
   }
 }
@@ -382,6 +405,18 @@ export class ApplicationSettingsStore {
     })
   }
 
+  async assignGestureModifier(
+    gesture: string,
+    modifier: GestureModifier,
+  ): Promise<UserConfig> {
+    return this.updateSettings((settings) => {
+      if (!isGestureName(gesture)) throw new Error('GESTURE_NOT_FOUND')
+      if (!isGestureModifier(modifier)) throw new Error('INVALID_GESTURE_MODIFIER')
+
+      settings.gestureModifierAssignments[gesture] = modifier
+    })
+  }
+
   async setGestureHoldMs(gestureHoldMs: number): Promise<UserConfig> {
     return this.updateSettings((settings) => {
       if (!isValidGestureHoldMs(gestureHoldMs)) {
@@ -491,7 +526,8 @@ export function migrateSettings(value: unknown): UserConfig | null {
       value.version !== 5 &&
       value.version !== 6 &&
       value.version !== 7 &&
-      value.version !== 8
+      value.version !== 8 &&
+      value.version !== 9
     )
   ) {
     return null
@@ -553,6 +589,16 @@ export function migrateSettings(value: unknown): UserConfig | null {
     }),
   )
 
+  const gestureModifierAssignments = Object.fromEntries(
+    ALL_GESTURE_NAMES.map((gesture) => {
+      if (value.version < 9 || !isRecord(value.gestureModifierAssignments)) {
+        return [gesture, 'none']
+      }
+      const modifier = value.gestureModifierAssignments[gesture]
+      return [gesture, isGestureModifier(modifier) ? modifier : 'none']
+    }),
+  )
+
   for (const gesture of ALL_GESTURE_NAMES) {
     if (windowsCommandAssignments[gesture] !== null) {
       gestureAssignments[gesture] = null
@@ -567,18 +613,19 @@ export function migrateSettings(value: unknown): UserConfig | null {
     : DEFAULT_GESTURE_HOLD_MS
 
   return {
-    version: 8,
+    version: 9,
     applications,
     gestureAssignments,
     inputSequenceAssignments,
     windowsCommandAssignments,
+    gestureModifierAssignments,
     gestureHoldMs,
   }
 }
 
 function parseApplicationTarget(
   value: unknown,
-  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
+  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
 ): ApplicationTarget | null {
   if (!isRecord(value)) return null
   if (value.kind === 'builtin' && typeof value.key === 'string' && value.key) {
@@ -613,7 +660,7 @@ function parseApplicationTarget(
 }
 
 function isLegacyDefaultAssignment(
-  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
+  settingsVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
   gesture: string,
   applicationId: string | null,
 ) {

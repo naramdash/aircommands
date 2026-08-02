@@ -70,6 +70,10 @@ interface Window {
       gesture: string
       command: WindowsCommand
     }): Promise<SettingsMutationResponse>
+    assignGestureModifier(payload: {
+      gesture: string
+      modifier: 'none' | 'control_left' | 'control_right'
+    }): Promise<SettingsMutationResponse>
     executeInputSequence(payload: {
       gesture: string
     }): Promise<InputSequenceExecutionResponse>
@@ -158,6 +162,7 @@ type UserSettingsView = {
   gestureAssignments: Record<string, string | null>
   inputSequenceAssignments: Record<string, InputSequenceStep[] | null>
   windowsCommandAssignments: Record<string, WindowsCommand | null>
+  gestureModifierAssignments: Record<string, 'none' | 'control_left' | 'control_right' | null>
   gestureHoldMs: number
   platform: string
   supportsCustomApplications: boolean

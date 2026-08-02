@@ -36,6 +36,7 @@
    - `gesture:assign`
    - `gesture:assign-input-sequence`
    - `gesture:assign-windows-command`
+   - `gesture:assign-modifier`
    - `input-sequence:execute`
    - `windows-command:execute`
    - `gesture:clear-all`
@@ -82,6 +83,8 @@
   with a validated key/delay/scroll sequence
 - `window.aircommands.assignWindowsCommand(...)`: binds one of 13 predefined Windows
   desktop functions to a gesture
+- `window.aircommands.assignGestureModifier(...)`: binds a required modifier key requirement
+  (`none`, `control_left`, `control_right`) to a gesture
 - `window.aircommands.executeInputSequence(...)`: executes the sequence already stored
   for a gesture; the renderer cannot submit arbitrary execution steps
 - `window.aircommands.executeWindowsCommand(...)`: executes the Windows command stored
@@ -108,10 +111,11 @@
   Catalog v2 persists validated, size-bounded icon data so the first picker opened
   after a restart can render icons without waiting for Windows discovery.
 - v1 path-only, v2 AppUserModelID, v3 one-hand, v4 unassigned-default, v5 Steam,
-  v6 input sequences, and v7 hold duration settings migrate to v8 automatically.
-  v4 removes retired two-hand assignments; v5 adds Steam App ID targets; v6 adds
-  per-gesture keyboard input sequences; v7 adds customizable touch hold duration;
-  v8 adds predefined Windows command assignments (`windowsCommandAssignments`).
+  v6 input sequences, v7 hold duration, and v8 Windows commands settings migrate
+  to v9 automatically. v4 removes retired two-hand assignments; v5 adds Steam App
+  ID targets; v6 adds per-gesture keyboard input sequences; v7 adds customizable
+  touch hold duration; v8 adds predefined Windows commands; v9 adds per-gesture
+  modifier key requirements (`gestureModifierAssignments`: `none`, `control_left`, `control_right`).
 - The first run keeps the legacy built-in registry for launch compatibility, but
   all six gesture assignments start unassigned.
 - During migration, assignments that still exactly match a former seeded default

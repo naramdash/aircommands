@@ -25,7 +25,7 @@ describe('ApplicationSettingsStore', () => {
 
     const settings = await store.getSettings()
 
-    expect(settings.version).toBe(8)
+    expect(settings.version).toBe(9)
     expect(settings.gestureHoldMs).toBe(280)
     expect(settings.applications).toHaveLength(21)
     expect(Object.keys(settings.gestureAssignments)).toHaveLength(6)
@@ -35,6 +35,8 @@ describe('ApplicationSettingsStore', () => {
       assignment === null)).toBe(true)
     expect(Object.values(settings.windowsCommandAssignments).every((assignment) =>
       assignment === null)).toBe(true)
+    expect(Object.values(settings.gestureModifierAssignments).every((modifier) =>
+      modifier === 'none')).toBe(true)
     expect(JSON.parse(await readFile(settingsPath, 'utf8'))).toEqual(settings)
   })
 
@@ -225,14 +227,14 @@ describe('ApplicationSettingsStore', () => {
     const migrated = await new ApplicationSettingsStore(settingsPath).getSettings()
     const persisted = JSON.parse(await readFile(settingsPath, 'utf8'))
 
-    expect(migrated.version).toBe(8)
+    expect(migrated.version).toBe(9)
     expect(migrated.gestureAssignments).not.toHaveProperty('touch_left_index_right_index')
     expect(persisted).toEqual(migrated)
   })
 })
 
 describe('migrateSettings', () => {
-  it('migrates v1 settings to v8 without changing custom one-hand assignments', () => {
+  it('migrates v1 settings to v9 without changing custom one-hand assignments', () => {
     const current = createDefaultSettings()
     const legacy = {
       ...current,
@@ -245,7 +247,7 @@ describe('migrateSettings', () => {
 
     const migrated = migrateSettings(legacy)
 
-    expect(migrated?.version).toBe(8)
+    expect(migrated?.version).toBe(9)
     expect(migrated?.gestureHoldMs).toBe(280)
     expect(migrated?.applications).toEqual(current.applications)
     expect(migrated?.gestureAssignments).toEqual({
@@ -273,7 +275,7 @@ describe('migrateSettings', () => {
     })
   })
 
-  it('migrates v4 settings to v8 without changing user assignments', () => {
+  it('migrates v4 settings to v9 without changing user assignments', () => {
     const current = createDefaultSettings()
     const versionFourSettings = {
       ...current,
@@ -286,7 +288,7 @@ describe('migrateSettings', () => {
 
     expect(migrateSettings(versionFourSettings)).toEqual({
       ...versionFourSettings,
-      version: 8,
+      version: 9,
     })
   })
 
@@ -309,7 +311,7 @@ describe('migrateSettings', () => {
     expect(first.created).toBe(true)
     expect(second.created).toBe(false)
     expect(second.applicationId).toBe(first.applicationId)
-    expect(reloaded.version).toBe(8)
+    expect(reloaded.version).toBe(9)
     expect(reloaded.applications.filter((application) =>
       application.target.kind === 'steam-app')).toEqual([
       expect.objectContaining({
@@ -414,8 +416,19 @@ describe('migrateSettings', () => {
     expect(migrated?.windowsCommandAssignments[invalidGesture]).toBeNull()
   })
 
+  it('assigns and persists gesture modifier requirements', async () => {
+    const settingsPath = await createSettingsPath()
+    const store = new ApplicationSettingsStore(settingsPath)
+    const gesture = ALL_GESTURE_NAMES[0]
+
+    await store.assignGestureModifier(gesture, 'control_left')
+    const settings = await store.getSettings()
+
+    expect(settings.gestureModifierAssignments[gesture]).toBe('control_left')
+  })
+
   it('rejects unknown settings versions', () => {
-    expect(migrateSettings({ version: 9 })).toBeNull()
+    expect(migrateSettings({ version: 99 })).toBeNull()
   })
 })
 
