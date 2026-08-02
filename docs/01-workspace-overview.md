@@ -21,8 +21,8 @@ AirCommands is a Bun workspace monorepo with two active applications:
 
 - Captures camera frames in renderer (`src/App.vue`)
 - Runs gesture recognition state updates in renderer
-- Sends app execution requests to main process through preload IPC
-- Owns tray behavior, window lifecycle, and desktop notifications
+- Sends application launch, input sequence, Windows command, and Google web login requests to main process through preload IPC
+- Owns tray behavior, window lifecycle, background catalog refresh, and desktop notifications
 
 ### apps/web
 

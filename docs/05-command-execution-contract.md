@@ -44,6 +44,25 @@ endpoint. Web API requests retain their existing app-name contract.
 
 Both app stacks maintain a short in-memory dedupe window (`REQUEST_DEDUPE_MS = 3000`) keyed by requestId.
 
+## Input Sequence & Windows Command Execution Contracts (Electron)
+
+In addition to launching application targets (`app:open`), the Electron main process handles gesture execution for:
+
+### Input Sequence Execution (`input-sequence:execute`)
+
+- **Payload**: `{ gesture: string }`
+- **Behavior**: Main process loads the persisted key/delay/scroll sequence for the gesture from settings (`inputSequenceAssignments`), validates it, and generates native keyboard key events and mouse wheel scrolls via Windows `SendInput` API.
+- **Success Response**: `{ success: true, label: string, message: string }`
+- **Failure Response**: `{ success: false, error: 'INVALID_BODY' | 'INPUT_SEQUENCE_BUSY' | 'INPUT_SEQUENCE_NOT_FOUND' | 'UNSUPPORTED_INPUT_PLATFORM' | 'INPUT_SEQUENCE_EXECUTION_FAILED', message: string }`
+- **Security**: The renderer sends only the gesture identifier; it cannot pass arbitrary key codes or command strings to the execution endpoint.
+
+### Windows Command Execution (`windows-command:execute`)
+
+- **Payload**: `{ gesture: string }`
+- **Behavior**: Main process loads the stored predefined Windows function identifier (one of 13 supported shortcuts) from settings (`windowsCommandAssignments`), maps it to virtual key sequences, and sends native input via `SendInput`.
+- **Success Response**: `{ success: true, label: string, message: string }`
+- **Failure Response**: `{ success: false, error: 'INVALID_BODY' | 'WINDOWS_COMMAND_BUSY' | 'WINDOWS_COMMAND_NOT_FOUND' | 'UNSUPPORTED_WINDOWS_COMMAND_PLATFORM' | 'WINDOWS_COMMAND_EXECUTION_FAILED', message: string }`
+
 ## Platform Command Mapping
 
 - Electron built-ins allow multiple commands per platform and run them as trusted fallbacks.
@@ -60,6 +79,7 @@ Both app stacks maintain a short in-memory dedupe window (`REQUEST_DEDUPE_MS = 3
 
 ## Security Note
 
-Launching local apps is a privileged operation. Electron resolves only persisted
-application IDs in the main process. Any externally reachable server deployment
+Launching local apps and sending synthetic input events are privileged operations.
+Electron resolves only persisted application IDs, input sequences, and Windows
+command definitions in the main process. Any externally reachable server deployment
 must add stronger origin/session protections before exposure.

@@ -35,7 +35,9 @@
    - `application:test`
    - `gesture:assign`
    - `gesture:assign-input-sequence`
+   - `gesture:assign-windows-command`
    - `input-sequence:execute`
+   - `windows-command:execute`
    - `gesture:clear-all`
    - `app:notify-gesture`
    - `browser:close`
@@ -75,15 +77,27 @@
 - `window.aircommands.renameApplication(...)`: changes a display name
 - `window.aircommands.replaceApplicationTarget(...)`: replaces a target through a native picker
 - `window.aircommands.removeApplication(...)`: removes an app and clears its assignments
-- `window.aircommands.assignGesture(...)`: persists one gesture assignment
+- `window.aircommands.assignGesture(...)`: persists one gesture application assignment
 - `window.aircommands.assignInputSequence(...)`: replaces a gesture's program assignment
-  with a validated key/delay sequence
+  with a validated key/delay/scroll sequence
+- `window.aircommands.assignWindowsCommand(...)`: binds one of 13 predefined Windows
+  desktop functions to a gesture
 - `window.aircommands.executeInputSequence(...)`: executes the sequence already stored
   for a gesture; the renderer cannot submit arbitrary execution steps
+- `window.aircommands.executeWindowsCommand(...)`: executes the Windows command stored
+  for a gesture
 - `window.aircommands.clearGestureAssignments()`: clears all configurable assignments
   after confirmation without deleting registered applications
 - `window.aircommands.testApplication(...)`: tests a registered launch target
 - `window.aircommands.notifyGesture(...)`: emits success/failure toast event
+- `window.aircommands.closeBrowser()`: closes the internal browser window
+- `window.aircommands.getBrowserStatus()`: returns current internal browser state
+- `window.aircommands.getWebLoginSettings()`: fetches saved web login URL and login hint
+- `window.aircommands.setWebLoginSettings(...)`: persists web login URL and login hint
+- `window.aircommands.openWebLogin()`: launches browser and runs automated login sequence
+- `window.aircommands.onBrowserStatus(listener)`: subscribes to browser status updates
+- `window.aircommands.onApplicationCatalogUpdated(listener)`: subscribes to background catalog updates
+- `window.aircommands.onMainProcessMessage(listener)`: receives messages from main process
 
 ## User Application Settings
 
@@ -93,10 +107,11 @@
   the window is shown, then refreshed once in the background at each app start.
   Catalog v2 persists validated, size-bounded icon data so the first picker opened
   after a restart can render icons without waiting for Windows discovery.
-- v1 path-only, v2 AppUserModelID, v3 one-hand, and v4 unassigned-default
-  settings migrate to v7 automatically. v4 removes the retired two-hand
-  assignments and seeded one-hand defaults; v5 adds Steam App ID targets; v6
-  adds per-gesture keyboard input sequences; v7 adds the gesture hold duration.
+- v1 path-only, v2 AppUserModelID, v3 one-hand, v4 unassigned-default, v5 Steam,
+  v6 input sequences, and v7 hold duration settings migrate to v8 automatically.
+  v4 removes retired two-hand assignments; v5 adds Steam App ID targets; v6 adds
+  per-gesture keyboard input sequences; v7 adds customizable touch hold duration;
+  v8 adds predefined Windows command assignments (`windowsCommandAssignments`).
 - The first run keeps the legacy built-in registry for launch compatibility, but
   all six gesture assignments start unassigned.
 - During migration, assignments that still exactly match a former seeded default
