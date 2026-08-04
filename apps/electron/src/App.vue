@@ -22,6 +22,7 @@ import type {
   TouchContact,
   TouchFrame,
 } from './utils/gesture_command_detection/types'
+import googleIconUrl from './assets/google.svg'
 import { handLandmarker } from './utils/hand_landmark_detection'
 import { formatInputSequence } from './utils/input_sequence'
 import { getWindowsCommandOption } from './utils/windows_command'
@@ -33,6 +34,7 @@ const TOUCH_SUCCESS_COLOR = '34, 197, 94'
 const TOUCH_SUCCESS_HIGHLIGHT_MS = 900
 const EXECUTION_REQUEST_TIMEOUT_MS = 2500
 const WEB_LOGIN_GESTURE: GestureName = 'touch_left_thumb_ring'
+
 const FINGER_COLORS: Record<FingerName, string> = {
   thumb: '239, 68, 68',
   index: '34, 197, 94',
@@ -104,6 +106,11 @@ const activeTouchApplication = computed(() => {
 const activeTouchApplicationLabel = computed(() => {
   if (!activeTouchCommand.value) return ''
   return getGestureApplicationLabel(activeTouchCommand.value.gesture)
+})
+
+const activeTouchApplicationIconDataUrl = computed(() => {
+  if (!activeTouchCommand.value) return undefined
+  return getGestureApplicationIconDataUrl(activeTouchCommand.value.gesture)
 })
 
 const activeTouchApplicationIcon = computed(() => {
@@ -211,7 +218,7 @@ function getGestureApplicationLabel(gesture: GestureName) {
 }
 
 function getGestureApplicationIcon(gesture: GestureName) {
-  if (isWebLoginGesture(gesture)) return '🔐'
+  if (isWebLoginGesture(gesture)) return ''
   if (getInputSequenceForGesture(gesture)) return '⌨️'
   const windowsCommand = getWindowsCommandOption(getWindowsCommandForGesture(gesture))
   if (windowsCommand) return windowsCommand.icon
@@ -219,6 +226,7 @@ function getGestureApplicationIcon(gesture: GestureName) {
 }
 
 function getGestureApplicationIconDataUrl(gesture: GestureName) {
+  if (isWebLoginGesture(gesture)) return googleIconUrl
   if (getInputSequenceForGesture(gesture) || getWindowsCommandForGesture(gesture)) return undefined
   return getApplicationForGesture(gesture)?.iconDataUrl
 }
@@ -992,8 +1000,8 @@ onBeforeUnmount(() => {
       <span v-if="activeTouchCommand" class="pill">
         현재 동작:
         <img
-          v-if="activeTouchApplication?.iconDataUrl"
-          :src="activeTouchApplication.iconDataUrl"
+          v-if="activeTouchApplicationIconDataUrl || activeTouchApplication?.iconDataUrl"
+          :src="activeTouchApplicationIconDataUrl || activeTouchApplication?.iconDataUrl"
           alt=""
           class="gesture-application-icon">
         <span v-else>{{ activeTouchApplicationIcon }}</span>
@@ -1020,7 +1028,11 @@ onBeforeUnmount(() => {
 
     <WebLoginDialog
       v-if="isWebLoginDialogOpen"
-      @close="isWebLoginDialogOpen = false" />
+      :gesture="WEB_LOGIN_GESTURE"
+      :settings="settings"
+      @close="isWebLoginDialogOpen = false"
+      @update="updateSettings"
+      @status="handleSettingsStatus" />
 
     <GestureHoldDialog
       v-if="isGestureHoldDialogOpen"

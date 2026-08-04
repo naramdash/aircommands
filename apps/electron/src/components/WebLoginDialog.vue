@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import googleIconUrl from '../assets/google.svg'
+
+const props = defineProps<{
+  gesture?: string
+  settings?: UserSettingsView | null
+}>()
 
 const emit = defineEmits<{
   close: []
+  update: [settings: UserSettingsView]
+  status: [message: string, isError: boolean]
 }>()
 
 const loginUrl = ref('')
@@ -16,6 +24,39 @@ const status = ref<BrowserStatus>({
 const message = ref('')
 const isError = ref(false)
 const isBusy = ref(false)
+
+const currentGestureModifier = computed(() =>
+  props.gesture && props.settings
+    ? (props.settings.gestureModifierAssignments[props.gesture] ?? 'none')
+    : 'none')
+
+async function selectGestureModifier(modifier: 'none' | 'control_left' | 'control_right') {
+  if (!props.gesture) return
+  isBusy.value = true
+  try {
+    const response = await window.aircommands.assignGestureModifier({
+      gesture: props.gesture,
+      modifier,
+    })
+    if (!response.success) {
+      showMessage(response.message, true)
+      return
+    }
+    if (response.settings) emit('update', response.settings)
+    const modifierLabel =
+      modifier === 'none'
+        ? '필수 키 조건 없이 언제나 인식하도록 설정했습니다.'
+        : modifier === 'control_left'
+          ? '왼쪽 Ctrl 키 누름 조건을 설정했습니다.'
+          : '오른쪽 Ctrl 키 누름 조건을 설정했습니다.'
+    showMessage(modifierLabel, false)
+    emit('status', modifierLabel, false)
+  } catch (error) {
+    showMessage(error instanceof Error ? error.message : '인식 조건을 변경하지 못했습니다.', true)
+  } finally {
+    isBusy.value = false
+  }
+}
 
 let removeStatusListener: (() => void) | null = null
 
@@ -115,11 +156,41 @@ onBeforeUnmount(() => {
     <section class="web-login-dialog" role="dialog" aria-modal="true" aria-labelledby="web-login-title">
       <header class="web-login-header">
         <div>
-          <h2 id="web-login-title">Google 웹 로그인</h2>
+          <h2 id="web-login-title"><img :src="googleIconUrl" alt="" class="dialog-title-icon"> Google 웹 로그인</h2>
           <p>왼손 엄지 + 약지 제스처에서 사용할 로그인 주소와 계정을 설정합니다.</p>
         </div>
         <button type="button" class="icon-button" aria-label="닫기" @click="emit('close')">×</button>
       </header>
+
+      <div v-if="gesture && settings" class="modifier-bar">
+        <span class="modifier-title">인식 조건 (필수 키):</span>
+        <div class="modifier-options">
+          <button
+            type="button"
+            class="modifier-pill"
+            :class="{ active: currentGestureModifier === 'none' }"
+            :disabled="isBusy"
+            @click="selectGestureModifier('none')">
+            없음 (언제나 인식)
+          </button>
+          <button
+            type="button"
+            class="modifier-pill"
+            :class="{ active: currentGestureModifier === 'control_left' }"
+            :disabled="isBusy"
+            @click="selectGestureModifier('control_left')">
+            왼쪽 Ctrl
+          </button>
+          <button
+            type="button"
+            class="modifier-pill"
+            :class="{ active: currentGestureModifier === 'control_right' }"
+            :disabled="isBusy"
+            @click="selectGestureModifier('control_right')">
+            오른쪽 Ctrl
+          </button>
+        </div>
+      </div>
 
       <div class="web-login-content">
         <div class="browser-status-row">
@@ -227,6 +298,15 @@ onBeforeUnmount(() => {
 
 .web-login-header h2 {
   font-size: 17px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dialog-title-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
 }
 
 .web-login-header p {
@@ -383,6 +463,54 @@ button:disabled {
   color: #9eb6d1;
   font-size: 11px;
   border-top: 1px solid rgba(94, 119, 150, 0.35);
+}
+
+.modifier-bar {
+  margin: 12px 18px 0;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(71, 85, 105, 0.45);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.modifier-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #94a3b8;
+}
+
+.modifier-options {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.modifier-pill {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(71, 85, 105, 0.5);
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.modifier-pill:hover:not(:disabled) {
+  border-color: #38bdf8;
+  color: #f8fafc;
+}
+
+.modifier-pill.active {
+  background: rgba(14, 165, 233, 0.25);
+  border-color: #38bdf8;
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
 }
 
 @media (max-width: 640px) {
