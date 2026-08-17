@@ -9,6 +9,12 @@ export interface AppConfig {
 
 export const AVAILABLE_APPS: AppConfig[] = [
   {
+    name: 'google-login',
+    windows: [],
+    darwin: [],
+    linux: [],
+  },
+  {
     name: 'chrome',
     windows: ['start chrome'],
     darwin: ['open -a "Google Chrome"'],

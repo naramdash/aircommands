@@ -28,14 +28,13 @@ const discoveryWarning = ref('')
 const isEditingName = ref(false)
 const isReplacingCurrent = ref(false)
 const editingName = ref('')
-const selectedCategory = ref<'application' | 'input-sequence' | 'windows-command'>(
-  props.gesture && props.settings.windowsCommandAssignments[props.gesture]
-    ? 'windows-command'
-    : props.gesture && props.settings.inputSequenceAssignments[props.gesture]
-      ? 'input-sequence'
-      : 'application',
-)
-let removeCatalogListener: (() => void) | null = null
+const webLoginUrl = ref('')
+const webLoginHint = ref('')
+const isWebLoginLoading = ref(false)
+const isWebLoginSaving = ref(false)
+const isWebLoginTesting = ref(false)
+const webLoginError = ref('')
+const webLoginSuccessMessage = ref('')
 
 const mode = computed(() => {
   if (props.replaceApplicationId || isReplacingCurrent.value) return 'replace'
@@ -50,7 +49,7 @@ const title = computed(() => {
 })
 
 const description = computed(() => mode.value === 'assign'
-  ? '프로그램, 입력 시퀀스 또는 Windows 기능을 이 제스처에 배정합니다.'
+  ? '프로그램, 입력 시퀀스, Windows 기능 또는 웹 기능을 이 제스처에 배정합니다.'
   : '프로그램을 고르면 설정이 바로 저장됩니다.')
 
 const currentApplicationId = computed(() =>
@@ -71,9 +70,28 @@ const currentApplication = computed(() => {
     application.id === applicationId) ?? null
 })
 
+const isWebLoginAssigned = computed(() =>
+  Boolean(
+    currentApplication.value?.id === 'builtin:google-login' ||
+    (currentApplication.value?.targetKind === 'builtin' && currentApplication.value?.targetLabel === 'google-login'),
+  ))
+
+const selectedCategory = ref<'application' | 'input-sequence' | 'windows-command' | 'web-function'>(
+  props.gesture && isWebLoginAssigned.value
+    ? 'web-function'
+    : props.gesture && props.settings.windowsCommandAssignments[props.gesture]
+      ? 'windows-command'
+      : props.gesture && props.settings.inputSequenceAssignments[props.gesture]
+        ? 'input-sequence'
+        : 'application',
+)
+let removeCatalogListener: (() => void) | null = null
+
 const filteredDirectApplications = computed(() => {
   return filterSelectableRegisteredApplications(
-    props.settings.applications,
+    props.settings.applications.filter((application) =>
+      application.id !== 'builtin:google-login' &&
+      !(application.targetKind === 'builtin' && application.targetLabel === 'google-login')),
     query.value,
     !props.settings.supportsCustomApplications,
   )
@@ -87,6 +105,86 @@ const filteredDiscoveredApplications = computed(() => {
     })
 })
 
+async function loadWebLoginSettings() {
+  isWebLoginLoading.value = true
+  webLoginError.value = ''
+  try {
+    const response = await window.aircommands.getWebLoginSettings()
+    if (response.success) {
+      webLoginUrl.value = response.settings.loginUrl
+      webLoginHint.value = response.settings.loginHint
+    }
+  } catch (error) {
+    webLoginError.value = error instanceof Error ? error.message : '웹 로그인 설정을 불러오지 못했습니다.'
+  } finally {
+    isWebLoginLoading.value = false
+  }
+}
+
+async function saveWebLoginSettings() {
+  isWebLoginSaving.value = true
+  webLoginError.value = ''
+  webLoginSuccessMessage.value = ''
+  try {
+    const response = await window.aircommands.setWebLoginSettings({
+      loginUrl: webLoginUrl.value,
+      loginHint: webLoginHint.value,
+    })
+    if (response.success) {
+      webLoginSuccessMessage.value = '로그인 설정을 저장했습니다.'
+      emit('status', 'Google 웹 로그인 설정을 저장했습니다.', false)
+    } else {
+      webLoginError.value = response.message
+      emit('status', response.message, true)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '로그인 설정 저장에 실패했습니다.'
+    webLoginError.value = message
+    emit('status', message, true)
+  } finally {
+    isWebLoginSaving.value = false
+  }
+}
+
+async function testWebLogin() {
+  isWebLoginTesting.value = true
+  webLoginError.value = ''
+  try {
+    const response = await window.aircommands.openWebLogin()
+    if (!response.success) {
+      webLoginError.value = response.message
+      emit('status', response.message, true)
+    } else {
+      emit('status', 'Google 웹 로그인 창을 열었습니다.', false)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Google 로그인 화면을 열지 못했습니다.'
+    webLoginError.value = message
+    emit('status', message, true)
+  } finally {
+    isWebLoginTesting.value = false
+  }
+}
+
+async function assignGoogleWebLogin() {
+  if (!props.gesture) return
+  const googleLoginApp = props.settings.applications.find(
+    (app) => app.id === 'builtin:google-login' || (app.targetKind === 'builtin' && app.targetLabel === 'google-login'),
+  )
+  if (!googleLoginApp) {
+    emit('status', 'Google 웹 로그인 항목을 찾을 수 없습니다.', true)
+    return
+  }
+
+  await runMutation(
+    window.aircommands.assignGesture({
+      gesture: props.gesture,
+      applicationId: googleLoginApp.id,
+    }),
+    'Google 웹 로그인을 제스처에 배정했습니다.',
+  )
+}
+
 onMounted(() => {
   removeCatalogListener = window.aircommands.onApplicationCatalogUpdated((response) => {
     if (!response.success) return
@@ -95,6 +193,7 @@ onMounted(() => {
     discoveryError.value = ''
   })
   void loadDiscoveredApplications(false)
+  void loadWebLoginSettings()
 })
 
 onBeforeUnmount(() => removeCatalogListener?.())
@@ -360,6 +459,13 @@ function getErrorMessage(error: unknown) {
           <span>🪟</span>
           Windows 기능
         </button>
+        <button
+          type="button"
+          :class="{ active: selectedCategory === 'web-function' }"
+          @click="selectedCategory = 'web-function'">
+          <span>🌐</span>
+          웹 기능
+        </button>
       </nav>
 
       <div v-if="mode === 'assign' && gesture" class="modifier-bar">
@@ -484,6 +590,85 @@ function getErrorMessage(error: unknown) {
                 <small>{{ option.description }}</small>
               </span>
             </button>
+          </div>
+        </section>
+
+        <section v-else-if="selectedCategory === 'web-function' && gesture" class="web-function-section">
+          <div class="section-title">
+            <div>
+              <h3>웹 기능</h3>
+              <p class="section-description">웹 자동화 및 계정 로그인 기능을 제스처에 배정합니다.</p>
+            </div>
+          </div>
+
+          <div class="web-card">
+            <div class="web-card-header">
+              <div class="web-card-identity">
+                <span class="web-card-icon">🌐</span>
+                <div>
+                  <strong>Google 웹 로그인</strong>
+                  <small>설정된 웹사이트 주소를 열고 Google 원클릭 로그인을 자동 수행합니다.</small>
+                </div>
+              </div>
+              <span v-if="isWebLoginAssigned" class="badge-assigned">현재 배정됨</span>
+            </div>
+
+            <form class="web-settings-form" @submit.prevent="saveWebLoginSettings">
+              <label class="web-field">
+                <span class="field-title">로그인 웹사이트 주소 (URL)</span>
+                <input
+                  v-model="webLoginUrl"
+                  type="url"
+                  placeholder="https://example.com/login"
+                  :disabled="isWebLoginSaving || isWebLoginTesting">
+              </label>
+              <label class="web-field">
+                <span class="field-title">Google 계정 힌트 (이메일 등)</span>
+                <input
+                  v-model="webLoginHint"
+                  type="text"
+                  placeholder="user@example.com"
+                  :disabled="isWebLoginSaving || isWebLoginTesting">
+              </label>
+
+              <p v-if="webLoginError" class="message error">{{ webLoginError }}</p>
+              <p v-else-if="webLoginSuccessMessage" class="message success">{{ webLoginSuccessMessage }}</p>
+
+              <div class="web-form-actions">
+                <button
+                  type="submit"
+                  class="secondary"
+                  :disabled="isWebLoginSaving || isWebLoginTesting || isWebLoginLoading">
+                  {{ isWebLoginSaving ? '저장 중…' : '설정 저장' }}
+                </button>
+                <button
+                  type="button"
+                  class="secondary"
+                  :disabled="isWebLoginSaving || isWebLoginTesting || isWebLoginLoading || !webLoginUrl"
+                  @click="testWebLogin">
+                  {{ isWebLoginTesting ? '실행 중…' : '테스트 실행' }}
+                </button>
+              </div>
+            </form>
+
+            <div class="web-assign-footer">
+              <button
+                v-if="!isWebLoginAssigned"
+                type="button"
+                class="primary"
+                :disabled="isMutating"
+                @click="assignGoogleWebLogin">
+                이 제스처에 배정
+              </button>
+              <button
+                v-else
+                type="button"
+                class="danger"
+                :disabled="isMutating"
+                @click="clearAssignment">
+                제스처 배정 해제
+              </button>
+            </div>
           </div>
         </section>
 
@@ -931,6 +1116,100 @@ button.danger {
   color: #fecaca;
   background: rgba(127, 29, 29, 0.35);
   border: 1px solid rgba(248, 113, 113, 0.55);
+}
+
+.web-function-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.web-card {
+  padding: 16px;
+  background: rgba(9, 16, 28, 0.88);
+  border: 1px solid rgba(94, 119, 150, 0.4);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.web-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.web-card-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.web-card-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.web-card-identity strong {
+  display: block;
+  font-size: 15px;
+  color: #f1f5f9;
+}
+
+.web-card-identity small {
+  display: block;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.badge-assigned {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #38bdf8;
+  background: rgba(14, 165, 233, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  white-space: nowrap;
+}
+
+.web-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(71, 85, 105, 0.4);
+  border-radius: 10px;
+}
+
+.web-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #cbd5e1;
+}
+
+.web-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.web-assign-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(71, 85, 105, 0.3);
 }
 
 @media (max-width: 650px) {

@@ -133,6 +133,7 @@ const LEGACY_DEFAULT_APP_CYCLE = [
 ] as const
 
 const APP_PRESENTATION: Record<string, { name: string, icon: string }> = {
+  'google-login': { name: 'Google 웹 로그인', icon: '🌐' },
   chrome: { name: 'Chrome', icon: '🌐' },
   firefox: { name: 'Firefox', icon: '🦊' },
   paint: { name: '그림판', icon: '🎨' },
@@ -548,6 +549,19 @@ export function migrateSettings(value: unknown): UserConfig | null {
       id: candidate.id,
       name: normalizeApplicationName(candidate.name),
       target,
+    })
+  }
+
+  const googleLoginId = getBuiltinApplicationId('google-login')
+  if (!applicationIds.has(googleLoginId)) {
+    applicationIds.add(googleLoginId)
+    applications.unshift({
+      id: googleLoginId,
+      name: getBuiltinPresentation('google-login').name,
+      target: {
+        kind: 'builtin',
+        key: 'google-login',
+      },
     })
   }
 

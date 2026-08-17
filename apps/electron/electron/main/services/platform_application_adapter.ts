@@ -108,6 +108,12 @@ export async function validateWindowsApplicationTarget(
   return { success: true }
 }
 
+let webLoginLauncher: (() => Promise<ApplicationLaunchResult>) | null = null
+
+export function registerWebLoginLauncher(launcher: () => Promise<ApplicationLaunchResult>) {
+  webLoginLauncher = launcher
+}
+
 export async function launchApplication(
   application: ApplicationRecord,
   options: {
@@ -116,12 +122,25 @@ export async function launchApplication(
     launchAppId?: (appUserModelId: string) => Promise<void>
     resolveSteamExecutable?: () => Promise<string | null>
     launchSteamApp?: (steamExecutablePath: string, appId: string) => Promise<void>
+    openWebLogin?: () => Promise<ApplicationLaunchResult>
     platform?: NodeJS.Platform
   } = {},
 ): Promise<ApplicationLaunchResult> {
   const platform = options.platform ?? process.platform
 
   if (application.target.kind === 'builtin') {
+    if (application.target.key === 'google-login') {
+      const launcher = options.openWebLogin ?? webLoginLauncher
+      if (!launcher) {
+        return {
+          success: false,
+          error: 'EXECUTION_FAILED',
+          message: 'Google 웹 로그인 기능을 실행할 수 없습니다.',
+        }
+      }
+      return launcher()
+    }
+
     const commands = getAppCommands(application.target.key, platform)
     if (!commands) {
       return {

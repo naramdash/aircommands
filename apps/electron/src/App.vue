@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ApplicationPickerDialog from './components/ApplicationPickerDialog.vue'
 import GestureHoldDialog from './components/GestureHoldDialog.vue'
-import WebLoginDialog from './components/WebLoginDialog.vue'
 import {
   oneHandTouchGestureCommands,
   touchGestureCommands,
@@ -33,7 +32,6 @@ const TOUCH_COLOR = '250, 204, 21'
 const TOUCH_SUCCESS_COLOR = '34, 197, 94'
 const TOUCH_SUCCESS_HIGHLIGHT_MS = 900
 const EXECUTION_REQUEST_TIMEOUT_MS = 2500
-const WEB_LOGIN_GESTURE: GestureName = 'touch_left_thumb_ring'
 
 const FINGER_COLORS: Record<FingerName, string> = {
   thumb: '239, 68, 68',
@@ -64,12 +62,10 @@ const commandResultMessage = ref('')
 const gestureCompletionNotice = ref('')
 const settings = ref<UserSettingsView | null>(null)
 const applicationPickerGesture = ref<GestureName | null>(null)
-const isWebLoginDialogOpen = ref(false)
 const isGestureHoldDialogOpen = ref(false)
 const isClearingAssignments = ref(false)
 const isEditingCommands = computed(() =>
   Boolean(applicationPickerGesture.value) ||
-  isWebLoginDialogOpen.value ||
   isGestureHoldDialogOpen.value)
 const gestureHoldMs = computed(() => settings.value?.gestureHoldMs ?? TOUCH_HOLD_MS)
 const hasGestureAssignments = computed(() =>
@@ -204,12 +200,7 @@ function getWindowsCommandForGesture(gesture: GestureName) {
   return settings.value?.windowsCommandAssignments[gesture] ?? null
 }
 
-function isWebLoginGesture(gesture: GestureName) {
-  return gesture === WEB_LOGIN_GESTURE
-}
-
 function getGestureApplicationLabel(gesture: GestureName) {
-  if (isWebLoginGesture(gesture)) return 'Google 웹 로그인'
   const inputSequence = getInputSequenceForGesture(gesture)
   if (inputSequence) return formatInputSequence(inputSequence)
   const windowsCommand = getWindowsCommandOption(getWindowsCommandForGesture(gesture))
@@ -218,7 +209,6 @@ function getGestureApplicationLabel(gesture: GestureName) {
 }
 
 function getGestureApplicationIcon(gesture: GestureName) {
-  if (isWebLoginGesture(gesture)) return ''
   if (getInputSequenceForGesture(gesture)) return '⌨️'
   const windowsCommand = getWindowsCommandOption(getWindowsCommandForGesture(gesture))
   if (windowsCommand) return windowsCommand.icon
@@ -226,9 +216,12 @@ function getGestureApplicationIcon(gesture: GestureName) {
 }
 
 function getGestureApplicationIconDataUrl(gesture: GestureName) {
-  if (isWebLoginGesture(gesture)) return googleIconUrl
   if (getInputSequenceForGesture(gesture) || getWindowsCommandForGesture(gesture)) return undefined
-  return getApplicationForGesture(gesture)?.iconDataUrl
+  const app = getApplicationForGesture(gesture)
+  if (app?.id === 'builtin:google-login' || (app?.targetKind === 'builtin' && app?.targetLabel === 'google-login')) {
+    return googleIconUrl
+  }
+  return app?.iconDataUrl
 }
 
 function updateSettings(nextSettings: UserSettingsView) {
@@ -245,12 +238,14 @@ function updateSettings(nextSettings: UserSettingsView) {
   }
 }
 
-function openApplicationPicker(gesture: GestureName) {
-  if (isWebLoginGesture(gesture)) {
-    isWebLoginDialogOpen.value = true
+async function openApplicationPicker(gesture: GestureName) {
+  if (!settings.value) {
+    await loadSettings()
+  }
+  if (!settings.value) {
+    errorMessage.value = '설정을 불러오는 중입니다. 잠시 후 다시 시도하세요.'
     return
   }
-  if (!settings.value) return
   applicationPickerGesture.value = gesture
 }
 
@@ -672,42 +667,6 @@ async function notifyGestureResult(payload: {
 }
 
 async function executeCandidate(candidate: GestureCandidate) {
-  if (isWebLoginGesture(candidate.gesture)) {
-    const applicationLabel = 'Google 웹 로그인'
-    commandResultMessage.value = `${applicationLabel} 요청 중`
-    try {
-      const response = await window.aircommands.openWebLogin()
-      if (response.success) {
-        commandResultMessage.value = `${applicationLabel} 화면 열림`
-        await notifyGestureResult({
-          status: 'success',
-          gestureLabel: candidate.gestureLabel,
-          appLabel: applicationLabel,
-        })
-      } else {
-        commandResultMessage.value = `${applicationLabel} 실패`
-        errorMessage.value = response.message
-        await notifyGestureResult({
-          status: 'failure',
-          gestureLabel: candidate.gestureLabel,
-          appLabel: applicationLabel,
-          message: response.message,
-        })
-      }
-    } catch (error) {
-      commandResultMessage.value = `${applicationLabel} 실패`
-      const message = error instanceof Error ? error.message : 'Google 로그인 화면을 열지 못했습니다.'
-      errorMessage.value = message
-      await notifyGestureResult({
-        status: 'failure',
-        gestureLabel: candidate.gestureLabel,
-        appLabel: applicationLabel,
-        message,
-      })
-    }
-    return
-  }
-
   const inputSequence = settings.value?.inputSequenceAssignments[candidate.gesture]
   if (inputSequence) {
     const sequenceLabel = formatInputSequence(inputSequence)
@@ -951,7 +910,6 @@ onBeforeUnmount(() => {
             :key="command.gesture"
             :class="{
               active: command.gesture === currentTouchGesture,
-              fixed: isWebLoginGesture(command.gesture),
             }"
             tabindex="0"
             role="button"
@@ -986,7 +944,6 @@ onBeforeUnmount(() => {
               <span v-if="getGestureModifierBadge(command.gesture)" class="modifier-badge">
                 {{ getGestureModifierBadge(command.gesture) }}
               </span>
-              <span v-if="isWebLoginGesture(command.gesture)" class="fixed-label">고정</span>
             </strong>
           </li>
         </ul>
@@ -1023,14 +980,6 @@ onBeforeUnmount(() => {
       :settings="settings"
       :gesture="applicationPickerGesture"
       @close="applicationPickerGesture = null"
-      @update="updateSettings"
-      @status="handleSettingsStatus" />
-
-    <WebLoginDialog
-      v-if="isWebLoginDialogOpen"
-      :gesture="WEB_LOGIN_GESTURE"
-      :settings="settings"
-      @close="isWebLoginDialogOpen = false"
       @update="updateSettings"
       @status="handleSettingsStatus" />
 
@@ -1322,6 +1271,15 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   padding: 10px;
   font-size: 13px;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.one-hand-card li:hover,
+.one-hand-card li:focus-visible {
+  outline: none;
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
 }
 
 .gesture-label-line {

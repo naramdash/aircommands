@@ -28,6 +28,7 @@ import {
 import {
   buildSettingsView,
   pickWindowsApplication,
+  registerWebLoginLauncher,
   validateWindowsApplicationTarget,
 } from './services/platform_application_adapter'
 import {
@@ -691,6 +692,7 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  registerWebLoginLauncher(openWebLogin)
   const discoveryService = getWindowsApplicationDiscoveryService()
   await discoveryService.initialize()
   try {

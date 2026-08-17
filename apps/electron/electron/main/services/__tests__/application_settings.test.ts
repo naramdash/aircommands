@@ -27,7 +27,7 @@ describe('ApplicationSettingsStore', () => {
 
     expect(settings.version).toBe(9)
     expect(settings.gestureHoldMs).toBe(280)
-    expect(settings.applications).toHaveLength(21)
+    expect(settings.applications).toHaveLength(22)
     expect(Object.keys(settings.gestureAssignments)).toHaveLength(6)
     expect(Object.values(settings.gestureAssignments).every((assignment) =>
       assignment === null)).toBe(true)
