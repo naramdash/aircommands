@@ -461,6 +461,7 @@ function getErrorMessage(error: unknown) {
         </button>
         <button
           type="button"
+          style="display: none"
           :class="{ active: selectedCategory === 'web-function' }"
           @click="selectedCategory = 'web-function'">
           <span>🌐</span>
