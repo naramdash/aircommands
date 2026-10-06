@@ -1,46 +1,37 @@
-# Workspace Overview
+# Repository Overview
 
 ## Scope
 
-AirCommands is a Bun workspace monorepo with two active applications:
-
-- apps/electron: Desktop app (Electron + Vue + Vite)
-- apps/web: Web app and local API server (Nuxt 4 + Nitro)
+AirCommands is a single Electron desktop application using Vue, Vite, MediaPipe,
+and Vitest. Its package and source files live directly in the repository root.
 
 ## Repository Layout
 
-- package.json: root workspace config (`workspaces: ["apps/*"]`)
-- AGENTS.md: repository-level operating rules
-- docs/: current technical documentation
-- apps/electron: desktop package
-- apps/web: web package
+- `package.json`: application metadata, dependencies, and scripts.
+- `bun.lock`: locked dependencies for the desktop application.
+- `electron/`: main-process services and preload IPC bridge.
+- `src/`: renderer UI, gesture recognition, and bundled model assets.
+- `public/`: application icons and the local MediaPipe WASM runtime.
+- `build/`: application identity used by the main process and packaging config.
+- `docs/`: technical documentation.
+- `.github/workflows/electron-release.yml`: Windows/Linux builds and tagged releases.
+- `AGENTS.md`: repository operating rules.
 
-## Package Roles
+## Runtime Responsibilities
 
-### apps/electron
+- Capture camera frames and update gesture recognition in `src/App.vue`.
+- Send application launch, input sequence, Windows shortcut, and Google web login
+  requests to the main process through the preload IPC bridge.
+- Handle application discovery, persisted settings, tray behavior, window
+  lifecycle, background catalog refresh, and desktop notifications in the main
+  process.
 
-- Captures camera frames in renderer (`src/App.vue`)
-- Runs gesture recognition state updates in renderer
-- Sends application launch, input sequence, Windows command, and Google web login requests to main process through preload IPC
-- Owns tray behavior, window lifecycle, background catalog refresh, and desktop notifications
+Gesture recognition modules live in `src/utils/gesture_command_detection/`.
+There is no separate web application or local Nitro API server.
 
-### apps/web
+## Root Commands
 
-- Runs the same gesture domain model for web usage
-- Exposes local API routes:
-  - `POST /api/apps/open`
-  - `POST /api/open-chrome` (legacy path)
-- Contains Vitest suites for gesture and server utility modules
-
-## Current Reality (Important)
-
-Gesture domain logic exists in both packages:
-
-- apps/electron/src/utils/gesture_command_detection/*
-- apps/web/app/utils/gesture_command_detection/*
-
-This duplication is intentional in the current state, but future maintenance should consider a shared package.
-
-## Root Command
-
-- `bun run builds`: runs `build` script in all workspace apps
+- `bun install --frozen-lockfile`: install locked dependencies.
+- `bun run dev`: start the development app when explicitly requested.
+- `bun run test`: run the desktop unit tests.
+- `bun run build`: check types, bundle the app, and create a local package.

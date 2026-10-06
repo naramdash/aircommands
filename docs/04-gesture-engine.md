@@ -42,7 +42,6 @@ Recognition can be paused with warnings for:
 
 ## Execution Trigger
 
-When hold threshold is met, a `GestureCandidate` is emitted and app execution is requested by:
-
-- Electron renderer -> IPC (`app:open`)
-- Web client -> Nitro route (`/api/apps/open`)
+When the hold threshold is met, a `GestureCandidate` is emitted. The Electron
+renderer dispatches the assigned application, input sequence, Windows shortcut,
+or configured Google web login action through the preload IPC bridge.

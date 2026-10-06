@@ -1,26 +1,18 @@
-# AirCommands Docs Index
+# AirCommands Documentation
 
-This docs set is maintained against the current monorepo codebase state.
+These documents describe the Electron application in the repository root.
 
 ## Documents
 
-1. [01-workspace-overview.md](./01-workspace-overview.md)
-   - monorepo layout and package roles
-2. [02-electron-app.md](./02-electron-app.md)
-   - Electron runtime architecture and lifecycle behavior
-3. [03-web-app.md](./03-web-app.md)
-   - Nuxt app and Nitro server structure
-4. [04-gesture-engine.md](./04-gesture-engine.md)
-   - gesture model, touch detection, and reducer flow
-5. [05-command-execution-contract.md](./05-command-execution-contract.md)
-   - request and response contract for app launching
-6. [06-build-test-and-ops.md](./06-build-test-and-ops.md)
-   - build, test, and operating rules
-7. [07-known-issues-and-next-steps.md](./07-known-issues-and-next-steps.md)
-   - known risks and practical follow-up order
+- [Repository overview](01-workspace-overview.md): layout and runtime responsibilities.
+- [Electron app](02-electron-app.md): architecture, lifecycle, settings, and platform behavior.
+- [Gesture engine](04-gesture-engine.md): touch detection and recognition state transitions.
+- [Command execution contract](05-command-execution-contract.md): IPC requests and responses.
+- [Build, test, and operations](06-build-test-and-ops.md): commands and verification policy.
+- [Known issues and next steps](07-known-issues-and-next-steps.md): limitations and follow-up work.
 
 ## Maintenance Rules
 
-- prioritize current implementation facts over historical plans
-- keep paths and command examples Bun-first
-- update docs in the same change when runtime behavior changes
+- Prioritize current implementation facts over historical plans.
+- Keep paths relative to the repository root and command examples Bun-first.
+- Update documentation in the same change when runtime behavior changes.

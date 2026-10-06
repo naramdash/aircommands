@@ -1,25 +1,38 @@
-# Nuxt dev/build outputs
-.output
-.data
-.nuxt
-.nitro
-.cache
-.tmp
-dist
+# Dependencies
+node_modules/
 
-# Node dependencies
-node_modules
+# Build outputs
+dist/
+dist-ssr/
+dist-electron/
+release/
+*.tsbuildinfo
 
-# Logs
-logs
+# Temporary files and logs
+.cache/
+.tmp/
+logs/
 *.log
+*.local
 
-# Misc
+# Editor and OS files
+.vscode/.debug.env
+.idea/
+.fleet/
 .DS_Store
-.fleet
-.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# Local env files
+# Local environment files
 .env
 .env.*
 !.env.example
+
+# Bun is the repository package manager; keep bun.lock tracked
+package-lock.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+yarn.lock

@@ -10,7 +10,7 @@ Electron request fields:
 - clientRequestId: optional dedupe key
 
 The Electron renderer cannot send raw paths, commands, or arguments to the launch
-endpoint. Web API requests retain their existing app-name contract.
+endpoint.
 
 ## Response Shape
 
@@ -42,7 +42,8 @@ endpoint. Web API requests retain their existing app-name contract.
 
 ## Dedupe Policy
 
-Both app stacks maintain a short in-memory dedupe window (`REQUEST_DEDUPE_MS = 3000`) keyed by requestId.
+The main process maintains a short in-memory dedupe window
+(`REQUEST_DEDUPE_MS = 3000`) keyed by requestId.
 
 ## Input Sequence & Windows Command Execution Contracts (Electron)
 
@@ -75,11 +76,10 @@ In addition to launching application targets (`app:open`), the Electron main pro
   it with separate `-applaunch` and App ID arguments, without shell parsing.
 - Discovery IDs are deterministic target hashes and must resolve against the
   main-process discovery cache before registration or assignment.
-- Web utilities (`apps/web/server/utils/apps.ts`) currently map to one command per platform.
 
 ## Security Note
 
 Launching local apps and sending synthetic input events are privileged operations.
 Electron resolves only persisted application IDs, input sequences, and Windows
-command definitions in the main process. Any externally reachable server deployment
-must add stronger origin/session protections before exposure.
+command definitions in the main process. External pages loaded in the login
+browser do not receive the AirCommands preload bridge.

@@ -176,7 +176,7 @@
 
 ## Icon Strategy (Current)
 
-Minimal icon set in `apps/electron/public`:
+Minimal icon set in `public/`:
 
 - app-icon.png: tray, notification, non-Windows window icon, favicon
 - app-icon.ico: Windows window/packaging compatibility
